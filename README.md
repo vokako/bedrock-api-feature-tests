@@ -46,6 +46,8 @@ uv run python test_01_messages_basic.py
 | 14 | `test_14_tool_search.py` | Tool Search | `tool-search-tool-2025-10-19` |
 | 15 | `test_15_tool_input_examples.py` | Tool Input Examples | `tool-examples-2025-10-29` |
 | 16 | `test_16_adaptive_thinking.py` | Adaptive Thinking | — (`thinking.type: "adaptive"` + `effort`) |
+| 17 | `test_17_bash_tool.py` | Bash Tool | `computer-use-2025-01-24` |
+| 18 | `test_18_text_editor_tool.py` | Text Editor Tool | `computer-use-2025-01-24` |
 
 ## Configuration
 
