@@ -571,7 +571,7 @@ Skills 本质上是对 Code Execution + System Prompt 的结构化封装。
 
 Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://docs.anthropic.com/en/api/beta-headers](https://docs.anthropic.com/en/api/beta-headers)）。在 Bedrock 上需分类处理：
 
-### 直接透传（Bedrock 接受的 beta header）
+### 直接透传（Bedrock InvokeModel 接受的 beta header）
 
 以下 beta header 在 Bedrock InvokeModel API 上被接受（不会报 "invalid beta flag" 错误）：
 
@@ -580,15 +580,19 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://do
 | `interleaved-thinking-2025-05-14` | Interleaved Thinking | ✅ 已验证 |
 | `context-management-2025-06-27` | Context Editing | ✅ 已验证 |
 | `compact-2026-01-12` | Compaction | ✅ 已验证 |
-| `fine-grained-tool-streaming-2025-05-14` | Fine-grained Tool Streaming（已 GA，可用 `eager_input_streaming` 替代） | ✅ 已验证 |
+| `computer-use-2025-01-24` | Computer Use（bash + text editor 可用，computer 不可用） | ✅ 已验证 |
+| `computer-use-2025-11-24` | Computer Use（新版） | ✅ 已验证 |
+| `context-1m-2025-08-07` | 1M Context Window | ✅ 已验证 |
+| `structured-outputs-2025-11-13` | Structured Outputs | ✅ 已验证 |
+| `token-efficient-tools-2025-02-19` | Token Efficient Tools | ✅ 已验证 |
+| `effort-2025-11-24` | Effort Parameter | ✅ 已验证 |
 | `tool-examples-2025-10-29` | Tool Input Examples | ✅ 已验证 |
 | `tool-search-tool-2025-10-19` | Tool Search | ✅ 已验证 |
-| `computer-use-2025-01-24` | Computer Use（bash + text editor） | ⚠️ bash/text_editor 可用，computer 不可用 |
-| `computer-use-2024-10-22` | Computer Use（旧版） | ⚠️ 同上 |
+| `fine-grained-tool-streaming-2025-05-14` | Fine-grained Tool Streaming（已 GA，可用 `eager_input_streaming` 替代） | ✅ 已验证 |
+| `pdfs-2024-09-25` | PDF Support（已 GA） | ✅ |
+| `output-128k-2025-02-19` | 128k Output（已 GA） | ✅ |
+| `token-counting-2024-11-01` | Token Counting | ❌ header 被接受但功能不可用 |
 | `mcp-client-2025-11-20` | MCP Connector | ❌ header 被接受但功能不可用 |
-| `token-counting-2024-11-01` | Token Counting | ❌ header 被接受但无 count_tokens 端点 |
-| `pdfs-2024-09-25` | PDF Support（旧版 beta） | ✅ PDF 已 GA |
-| `output-128k-2025-02-19` | 128k Output | ✅ 已 GA |
 | `web-search-2025-03-05` | Web Search | ❌ header 被接受但功能不可用 |
 
 ### 需要映射（Bedrock 用不同 header 名称）
@@ -606,6 +610,7 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://do
 
 | Beta Header | 功能 |
 |------------|------|
+| `advanced-tool-use-2025-11-20` | Advanced Tool Use（Anthropic 侧的聚合 header，Bedrock 需用拆分后的 `tool-examples-2025-10-29` / `tool-search-tool-2025-10-19`） |
 | `prompt-caching-scope-2026-01-05` | Prompt Caching Scope |
 | `redact-thinking-2026-02-12` | Thinking 内容脱敏 |
 | `files-api-2025-04-14` | Files API |
@@ -614,7 +619,8 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://do
 | `max-tokens-3-5-sonnet-2024-07-15` | Max Tokens 3.5 Sonnet |
 | `message-batches-2024-09-24` | Message Batches |
 | `web-fetch-2025-09-10` | Web Fetch |
-| `advanced-tool-use-2025-11-20` | Advanced Tool Use（Anthropic 侧的聚合 header） |
+| `fast-mode-2026-02-01` | Fast Mode |
+| `skills-2025-10-02` | Agent Skills |
 
 参考实现: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py)
 
@@ -624,11 +630,22 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://do
 
 当 Claude Code 或 Agent SDK 检测到直连 Bedrock 时（`CLAUDE_CODE_USE_BEDROCK=1`），会改变自身行为：
 
-1. **丢弃 beta headers**：SDK 移除部分 beta header，导致 Extended Thinking、Adaptive Thinking 等功能行为与官方 API 不一致
-2. **max_tokens 自动裁剪**：已知问题 [https://github.com/anthropics/claude-code/issues/8756](https://github.com/anthropics/claude-code/issues/8756)
-3. **功能降级**：部分高级特性（如 PTC、Web Search）在直连 Bedrock 时不可用
-4. **tool_use 权限提示延迟 10-20 秒**：Claude Code 未在工具定义中设置 `eager_input_streaming: true`，导致 Bedrock 缓冲整个 tool_use JSON 块后才返回给客户端。直连 Anthropic API 时权限提示约 1-3 秒出现，Bedrock 上需 10-20 秒。该特性已 GA，全平台支持，仅需在工具定义中添加 `"eager_input_streaming": true` 即可解决。详见 [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
+1. **发送不兼容的 beta headers**：Claude Code 会发送 Bedrock 不支持的 beta header（如 `advanced-tool-use-2025-11-20`、`prompt-caching-scope-2026-01-05`），导致 "invalid beta flag" 错误。这是一个广泛影响的问题，LiteLLM 专门为此发布了 incident report 并实现了 provider-specific beta header 过滤机制。详见：
+   - [https://github.com/anthropics/claude-code/issues/11672](https://github.com/anthropics/claude-code/issues/11672)
+   - [https://docs.litellm.ai/blog/claude-code-beta-headers-incident](https://docs.litellm.ai/blog/claude-code-beta-headers-incident)
 
-**Workaround**：通过代理伪装为 Anthropic 官方 API（设置 `CLAUDE_CODE_USE_BEDROCK=0` + 自定义 `ANTHROPIC_BASE_URL`），让 SDK 保持完整的 beta header 和行为。对于 `eager_input_streaming` 问题，代理层可在转发请求时自动为所有工具定义注入 `"eager_input_streaming": true`。
+2. **max_tokens 自动裁剪**：已知问题 [https://github.com/anthropics/claude-code/issues/8756](https://github.com/anthropics/claude-code/issues/8756)
+
+3. **Task tool / 子 Agent 模型 ID 错误**：Task tool 生成子 Agent 时使用硬编码的 Anthropic 模型 ID（如 `.anthropic.claude-sonnet-4-5-20250929-v1:0`，缺少 `us` 前缀），导致 Bedrock 上 "The provided model identifier is invalid" 错误。所有自定义 Agent 和子 Agent 在 Bedrock 上完全不可用。详见 [https://github.com/anthropics/claude-code/issues/21235](https://github.com/anthropics/claude-code/issues/21235)
+
+4. **tool_use 权限提示延迟 10-20 秒**：Claude Code 未在工具定义中设置 `eager_input_streaming: true`，导致 Bedrock 缓冲整个 tool_use JSON 块后才返回给客户端。直连 Anthropic API 时权限提示约 1-3 秒出现，Bedrock 上需 10-20 秒。详见 [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
+
+5. **功能降级**：部分高级特性（如 PTC、Web Search、Code Execution）在直连 Bedrock 时不可用
+
+**Workaround**：通过代理伪装为 Anthropic 官方 API（设置 `CLAUDE_CODE_USE_BEDROCK=0` + 自定义 `ANTHROPIC_BASE_URL`），让 SDK 保持完整的 beta header 和行为。代理层负责：
+- 过滤 Bedrock 不支持的 beta header
+- 映射 `advanced-tool-use-2025-11-20` → `tool-examples-2025-10-29` / `tool-search-tool-2025-10-19`
+- 将 Anthropic 模型 ID 映射为 Bedrock 模型 ID
+- 自动为工具定义注入 `eager_input_streaming: true`
 
 参考实现: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py) — 请求入口，处理模型 ID 映射和 beta header 转换
