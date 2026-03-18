@@ -128,7 +128,11 @@
 | **Bedrock** | **Converse API 不支持**。仅 InvokeModel API 支持，需传递 `tool-search-tool-2025-10-19` beta header |
 | **Gap** | 使用 Converse API 的应用无法使用 Tool Search |
 
-**Workaround 原理**：检测到请求中包含 tool search 工具时，将 Anthropic beta header `advanced-tool-use-2025-11-20` 映射为 Bedrock 的 `tool-search-tool-2025-10-19`，并自动从 Converse API 切换到 InvokeModel API。仅对支持的模型生效（配置在 `beta_header_supported_models` 中）。
+**Workaround Solution**：
+
+- 检测到请求中包含 tool search 工具时，将 Anthropic beta header `advanced-tool-use-2025-11-20` 映射为 Bedrock 的 `tool-search-tool-2025-10-19`
+- 自动从 Converse API 切换到 InvokeModel API
+- 仅对支持的模型生效（配置在 `beta_header_supported_models` 中）
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool)
@@ -148,7 +152,10 @@
 | **Bedrock** | **Converse API 不支持**。仅 InvokeModel API 支持，需传递 `tool-examples-2025-10-29` beta header |
 | **Gap** | 与 Tool Search 相同，Converse API 不可用 |
 
-**Workaround 原理**：同 Tool Search — 映射 `advanced-tool-use-2025-11-20` → `tool-examples-2025-10-29`，自动切换到 InvokeModel API。
+**Workaround Solution**：
+
+- 同 Tool Search — 映射 `advanced-tool-use-2025-11-20` → `tool-examples-2025-10-29`
+- 自动切换到 InvokeModel API
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/implement-tool-use#providing-tool-use-examples](https://docs.anthropic.com/en/agents-and-tools/tool-use/implement-tool-use#providing-tool-use-examples)
@@ -165,7 +172,18 @@
 | **Bedrock** | **完全不支持**（Converse 和 Invoke API 均无此能力） |
 | **Gap** | Bedrock 无原生 Web Search |
 
-**Workaround 原理**：代理层拦截请求中的 `web_search_*` 工具定义，不传递给 Bedrock。当 Bedrock 返回的响应中包含对 web_search 工具的调用（`server_tool_use`）时，代理拦截该调用，由代理端调用第三方搜索 API（Tavily / Brave Search）执行搜索，将结果以 `web_search_tool_result` 格式注入响应，然后将带有搜索结果的消息重新发送给 Bedrock 继续生成。这形成一个代理端的 agentic loop。动态过滤版（`web_search_20260209`）需额外配合 Docker sandbox 执行 Claude 生成的过滤代码。
+**Workaround Solution**：
+
+代理端实现 agentic loop，拦截并执行搜索：
+
+1. 代理拦截请求中的 `web_search_*` 工具定义，不传递给 Bedrock
+2. 当 Bedrock 返回对 web_search 工具的调用（`server_tool_use`）时，代理拦截该调用
+3. 代理端调用第三方搜索 API（Tavily / Brave Search）执行搜索
+4. 将结果以 `web_search_tool_result` 格式注入响应
+5. 将带有搜索结果的消息重新发送给 Bedrock 继续生成
+6. 循环直到模型不再调用搜索（agentic loop）
+
+动态过滤版（`web_search_20260209`）需额外配合 Docker sandbox 执行 Claude 生成的过滤代码。
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/web-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/web-search-tool)
@@ -186,7 +204,14 @@
 | **Bedrock** | **完全不支持** |
 | **Gap** | Bedrock 无原生 Web Fetch |
 
-**Workaround 原理**：与 Web Search 类似的 agentic loop 模式。代理拦截 `web_fetch_*` 工具调用，使用 httpx 直接抓取 URL 内容（无需额外 API Key），内置 HTML 转纯文本。PDF 以 base64 传递。动态过滤版需 Docker sandbox。
+**Workaround Solution**：
+
+与 Web Search 类似的 agentic loop 模式：
+
+- 代理拦截 `web_fetch_*` 工具调用
+- 使用 httpx 直接抓取 URL 内容（无需额外 API Key）
+- 内置 HTML 转纯文本，PDF 以 base64 传递
+- 动态过滤版（`web_fetch_20260209`）需 Docker sandbox
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/web-fetch-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/web-fetch-tool)
@@ -206,7 +231,18 @@
 | **Bedrock** | **完全不支持** |
 | **Gap** | Bedrock 无 Code Execution 容器环境 |
 
-**Workaround 原理**：代理层识别 `code_execution_20250825` 工具，在代理端管理 Docker 容器。实现 `bash_code_execution` 和 `text_editor_code_execution` 两个子工具。代理运行一个 agentic loop：将 Bedrock 的响应中对 code execution 的调用拦截，在本地 Docker 容器中执行，将结果注入消息后重新发送给 Bedrock，直到模型不再调用 code execution 为止。需实现容器生命周期管理（创建、复用、过期）。
+**Workaround Solution**：
+
+代理端管理 Docker 容器，实现 agentic loop：
+
+1. 代理识别 `code_execution_20250825` 工具定义
+2. 实现 `bash_code_execution` 和 `text_editor_code_execution` 两个子工具
+3. 将 Bedrock 响应中对 code execution 的调用拦截
+4. 在本地 Docker 容器中执行命令/文件操作
+5. 将结果注入消息后重新发送给 Bedrock
+6. 循环直到模型不再调用 code execution
+
+需实现容器生命周期管理（创建、复用、过期）。
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/code-execution-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/code-execution-tool)
@@ -225,7 +261,17 @@
 | **Bedrock** | **完全不支持** |
 | **Gap** | Bedrock 无 Code Execution 环境，无法支持 PTC |
 
-**Workaround 原理**：代理层实现完整的 PTC 协议。核心流程：(1) 识别请求中 `allowed_callers` 包含 `code_execution` 的工具定义；(2) 将这些工具从发给 Bedrock 的请求中过滤掉（Bedrock 不认识 `allowed_callers`）；(3) 当 Bedrock 返回 `tool_use` 且 `caller.type == "code_execution"` 时，代理拦截该调用；(4) 在 Docker sandbox 中执行 Claude 生成的 Python 代码；(5) 当代码中调用了客户端工具时，暂停执行，将 `tool_use` 返回给客户端；(6) 客户端返回 `tool_result` 后，注入回 sandbox 继续执行；(7) 循环直到代码执行完毕，将最终结果作为 `code_execution_tool_result` 注入消息继续对话。
+**Workaround Solution**：
+
+代理层实现完整的 PTC 协议：
+
+1. 识别请求中 `allowed_callers` 包含 `code_execution` 的工具定义
+2. 将这些工具从发给 Bedrock 的请求中过滤掉（Bedrock 不认识 `allowed_callers`）
+3. 当 Bedrock 返回 `tool_use` 且 `caller.type == "code_execution"` 时，代理拦截
+4. 在 Docker sandbox 中执行 Claude 生成的 Python 代码
+5. 当代码中调用了客户端工具时，暂停执行，将 `tool_use` 返回给客户端
+6. 客户端返回 `tool_result` 后，注入回 sandbox 继续执行
+7. 循环直到代码执行完毕，将最终结果作为 `code_execution_tool_result` 注入消息继续对话
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/programmatic-tool-calling](https://docs.anthropic.com/en/agents-and-tools/tool-use/programmatic-tool-calling)
@@ -246,7 +292,14 @@
 | **Bedrock** | **完全不支持** |
 | **Gap** | Bedrock 无 Files API，每次请求需内联传递文件内容 |
 
-**Workaround 原理**：在代理层实现文件存储服务，使用 S3 作为后端存储，提供兼容的 `/v1/files` REST 端点（CRUD）。上传时将文件存入 S3 并在 DynamoDB 中记录 `file_id → S3 key` 映射；Messages 请求中遇到 `file_id` 引用时，从 S3 读取文件内容，按类型转换为对应的 content block（`document` / `image` / `container_upload`）内联注入请求体后发送给 Bedrock。
+**Workaround Solution**：
+
+在代理层实现文件存储服务：
+
+- 使用 S3 作为后端存储，提供兼容的 `/v1/files` REST 端点（CRUD）
+- 上传时将文件存入 S3，在 DynamoDB 中记录 `file_id → S3 key` 映射
+- Messages 请求中遇到 `file_id` 引用时，从 S3 读取文件内容
+- 按类型转换为对应的 content block（`document` / `image` / `container_upload`）内联注入请求体后发送给 Bedrock
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/build-with-claude/files](https://docs.anthropic.com/en/build-with-claude/files)
@@ -265,7 +318,18 @@
 | **Bedrock** | 有自己的 [https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)，但接口完全不同 |
 | **Gap** | 接口不兼容 |
 
-**Workaround 原理**：在代理层实现 Anthropic Batch API 接口（`POST /v1/messages/batches`），内部有两种策略：(1) 转换为 Bedrock Batch Inference Jobs（通过 `CreateModelInvocationJob` API），将批量请求写入 S3 JSONL 文件作为输入，异步执行后从 S3 读取结果；(2) 对于不支持 Batch Inference 的模型，使用 SQS 队列排队逐个调用 InvokeModel，通过 DynamoDB 跟踪每个请求的状态，客户端轮询 `GET /v1/messages/batches/{id}` 获取结果。
+**Workaround Solution**：
+
+在代理层实现 Anthropic Batch API 接口（`POST /v1/messages/batches`），两种策略：
+
+- **策略 A**：转换为 Bedrock Batch Inference Jobs
+  - 通过 `CreateModelInvocationJob` API
+  - 将批量请求写入 S3 JSONL 文件作为输入
+  - 异步执行后从 S3 读取结果
+- **策略 B**：排队逐个执行（适用于不支持 Batch Inference 的模型）
+  - 使用 SQS 队列排队逐个调用 InvokeModel
+  - 通过 DynamoDB 跟踪每个请求的状态
+  - 客户端轮询 `GET /v1/messages/batches/{id}` 获取结果
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/build-with-claude/batch-processing](https://docs.anthropic.com/en/build-with-claude/batch-processing)
@@ -284,7 +348,14 @@
 | **Bedrock** | **不支持**独立 token 计数端点 |
 | **Gap** | 无法在发送前预估 token |
 
-**Workaround 原理**：在代理层实现 `POST /v1/messages/count_tokens` 端点，使用 Anthropic 官方开源的 tokenizer 进行本地计算。Claude 使用的 tokenizer 基于 `tiktoken`，Anthropic Python SDK 内置了 `client.count_tokens()` 方法可参考。也可使用 `anthropic-tokenizer` 包离线计算。需注意：图片和 PDF 的 token 计算需要按 Anthropic 的规则估算（如图片按分辨率计算）。
+**Workaround Solution**：
+
+在代理层实现 `POST /v1/messages/count_tokens` 端点：
+
+- 使用 Anthropic 官方开源的 tokenizer 进行本地计算
+- Claude 使用的 tokenizer 基于 `tiktoken`，Anthropic Python SDK 内置了 `client.count_tokens()` 方法可参考
+- 也可使用 `anthropic-tokenizer` 包离线计算
+- 注意：图片和 PDF 的 token 计算需按 Anthropic 的规则估算（如图片按分辨率计算）
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/build-with-claude/token-counting](https://docs.anthropic.com/en/build-with-claude/token-counting)
@@ -303,7 +374,17 @@
 | **Bedrock** | **不支持** |
 | **Gap** | Bedrock 无法在推理时连接外部 MCP 服务器 |
 
-**Workaround 原理**：在代理层实现 MCP 客户端。解析请求中的 `mcp_servers` 字段，使用 MCP SDK（如 `@modelcontextprotocol/sdk`）连接指定的远程 MCP 服务器，调用 `tools/list` 获取工具列表，将其转换为 Anthropic tool 定义注入请求的 `tools` 数组。当模型返回对 MCP 工具的调用时，代理通过 MCP 协议调用对应服务器的 `tools/call`，将结果作为 `tool_result` 注入消息继续对话。需处理 MCP 服务器的连接管理、认证、超时和错误重试。
+**Workaround Solution**：
+
+在代理层实现 MCP 客户端：
+
+1. 解析请求中的 `mcp_servers` 字段
+2. 使用 MCP SDK 连接指定的远程 MCP 服务器
+3. 调用 `tools/list` 获取工具列表，转换为 Anthropic tool 定义注入请求的 `tools` 数组
+4. 当模型返回对 MCP 工具的调用时，代理通过 MCP 协议调用对应服务器的 `tools/call`
+5. 将结果作为 `tool_result` 注入消息继续对话
+
+需处理 MCP 服务器的连接管理、认证、超时和错误重试。
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/agents-and-tools/mcp-connector](https://docs.anthropic.com/en/agents-and-tools/mcp-connector)
@@ -323,7 +404,15 @@
 | **Bedrock** | **不支持** |
 | **Gap** | 无原生记忆持久化 |
 
-**Workaround 原理**：在代理层实现记忆存储服务。使用 DynamoDB（或 Redis）作为后端，按 `user_id` / `organization_id` 分区存储记忆条目。拦截请求中的 `memory_20250801` 工具定义，当模型调用 memory tool 时（`add_memory` / `search_memory` / `delete_memory`），代理拦截 `server_tool_use` 调用，在本地执行记忆的 CRUD 操作，将结果以 `tool_result` 格式注入响应。搜索操作可使用 DynamoDB 的 GSI 或接入向量数据库（如 Amazon OpenSearch）实现语义检索。
+**Workaround Solution**：
+
+在代理层实现记忆存储服务：
+
+- 使用 DynamoDB（或 Redis）作为后端，按 `user_id` / `organization_id` 分区存储记忆条目
+- 拦截请求中的 `memory_20250801` 工具定义
+- 当模型调用 memory tool 时（`add_memory` / `search_memory` / `delete_memory`），代理拦截 `server_tool_use` 调用
+- 在本地执行记忆的 CRUD 操作，将结果以 `tool_result` 格式注入响应
+- 搜索操作可使用 DynamoDB 的 GSI 或接入向量数据库（如 Amazon OpenSearch）实现语义检索
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/memory-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/memory-tool)
@@ -342,7 +431,18 @@
 | **Bedrock** | **不支持** |
 | **Gap** | Anthropic 特有的 agentic tools |
 
-**Workaround 原理**：这些工具本质上是客户端工具（client-side tool）——Anthropic API 中模型返回 `tool_use` 后，由客户端负责执行并返回 `tool_result`。因此 Bedrock 不需要原生支持这些工具，只需要模型能正确生成对这些工具的调用即可。代理层的处理方式：(1) 将这些工具定义原样传递给 Bedrock InvokeModel API（格式兼容）；(2) 模型返回 `tool_use` 后，代理透传给客户端；(3) 客户端在本地环境执行 bash 命令 / 屏幕操作 / 文件编辑，将 `tool_result` 返回代理继续对话。关键在于客户端需自行实现执行环境（如 Docker 容器、VNC 等）。
+**Workaround Solution**：
+
+这些工具本质上是客户端工具（client-side tool）——模型返回 `tool_use` 后，由客户端负责执行并返回 `tool_result`。Bedrock 不需要原生支持，只需模型能正确生成调用即可。
+
+代理层处理方式：
+
+1. 将工具定义原样传递给 Bedrock InvokeModel API（格式兼容）
+2. 模型返回 `tool_use` 后，代理透传给客户端
+3. 客户端在本地环境执行 bash 命令 / 屏幕操作 / 文件编辑
+4. 将 `tool_result` 返回代理继续对话
+
+关键在于客户端需自行实现执行环境（如 Docker 容器、VNC 等）。
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/bash-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/bash-tool) / [https://docs.anthropic.com/en/agents-and-tools/tool-use/computer-use-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/computer-use-tool) / [https://docs.anthropic.com/en/agents-and-tools/tool-use/text-editor-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/text-editor-tool)
@@ -361,7 +461,16 @@
 | **Bedrock** | **不支持** |
 | **Gap** | 依赖 Code Execution，Bedrock 无此基础设施 |
 
-**Workaround 原理**：需先解决 Code Execution Tool 的 gap（见第 5 项）。在此基础上，代理层实现 Skills 加载机制：(1) 解析请求中的 skill 定义（包含指令、脚本、资源文件）；(2) 将 skill 的指令注入 system prompt；(3) 将 skill 的脚本和资源文件预加载到 Code Execution 容器中；(4) 模型在执行过程中可通过 code execution 调用 skill 提供的脚本。Skills 本质上是对 Code Execution + System Prompt 的结构化封装。
+**Workaround Solution**：
+
+需先解决 Code Execution Tool 的 gap（见第 5 项）。在此基础上：
+
+1. 解析请求中的 skill 定义（包含指令、脚本、资源文件）
+2. 将 skill 的指令注入 system prompt
+3. 将 skill 的脚本和资源文件预加载到 Code Execution 容器中
+4. 模型在执行过程中可通过 code execution 调用 skill 提供的脚本
+
+Skills 本质上是对 Code Execution + System Prompt 的结构化封装。
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/agents-and-tools/agent-skills/overview](https://docs.anthropic.com/en/agents-and-tools/agent-skills/overview)
