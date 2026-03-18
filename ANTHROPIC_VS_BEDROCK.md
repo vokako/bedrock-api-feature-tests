@@ -51,67 +51,109 @@
 以下特性 Bedrock 完整支持。其中 Bedrock InvokeModel API 与 Anthropic API 格式基本等价（请求/响应结构相同，仅需添加 `anthropic_version` 字段和调整认证方式），无需做格式转换；Converse API 则需要做 Anthropic ↔ Bedrock 格式转换。
 
 ### Messages API 基础
+
+Claude 的核心对话接口，支持多轮对话、system prompt、assistant prefill。所有与 Claude 的交互都通过此 API 进行。
+
 - **Anthropic**: [https://docs.anthropic.com/en/api/messages](https://docs.anthropic.com/en/api/messages)
 - **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html)
 - InvokeModel API 与 Anthropic API 格式基本等价，直接透传即可。Converse API 提供统一接口但格式不同，需做转换。
 
 ### Streaming (SSE)
+
+服务端推送事件流，实现逐 token 输出。适用于需要实时展示生成过程的交互式应用（聊天、代码生成等）。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/streaming](https://docs.anthropic.com/en/build-with-claude/streaming)
 - **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html) / ConverseStream
 - InvokeModelWithResponseStream 返回的 SSE 事件格式与 Anthropic 一致。ConverseStream 使用 Bedrock 自有格式，需转换。
 
 ### Tool Use（函数调用）
+
+让 Claude 调用外部工具/函数，如查询数据库、调用 API、执行计算等。是构建 Agent 的核心能力。
+
 - **Anthropic**: [https://docs.anthropic.com/en/agents-and-tools/tool-use/overview](https://docs.anthropic.com/en/agents-and-tools/tool-use/overview)
 - **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html)
 - InvokeModel API 下工具定义格式与 Anthropic 一致。Converse API 下工具 schema 格式不同，需做转换。
 
 ### Extended Thinking
+
+让 Claude 在回答前进行深度推理，输出 thinking block。适用于数学、逻辑推理、复杂代码等需要多步思考的任务。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/extended-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking)
 - **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html)
 - Converse 和 Invoke API 均支持 `thinking` 参数。
 
 ### Adaptive Thinking
+
+Claude 动态决定是否思考及思考深度，无需手动设置 `budget_tokens`。适用于任务复杂度不均匀的场景（如 agentic workflow 中简单和复杂步骤交替出现）。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/adaptive-thinking](https://docs.anthropic.com/en/build-with-claude/adaptive-thinking)
 - **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html)
-- `thinking: {type: "adaptive"}` — Claude 动态决定是否思考及思考深度。无需 beta header。仅 Opus 4.6 / Sonnet 4.6 支持。自动启用 interleaved thinking。可配合 `output_config.effort`（`max`/`high`/`medium`/`low`）控制思考程度。
+- `thinking: {type: "adaptive"}` — 无需 beta header。仅 Opus 4.6 / Sonnet 4.6 支持。自动启用 interleaved thinking。可配合 `output_config.effort`（`max`/`high`/`medium`/`low`）控制思考程度。
 
 ### Interleaved Thinking
+
+在工具调用之间穿插思考过程。适用于多步工具调用的 Agent 场景，让 Claude 在每次工具返回后重新思考下一步。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking)
 - **Bedrock**: Beta header `interleaved-thinking-2025-05-14` 直接透传。
-- 在手动 extended thinking 模式（`thinking.type: "enabled"`）下，通过 beta header 启用工具调用之间的思考。Adaptive thinking 模式下自动启用，无需此 header。
+- 在手动 extended thinking 模式（`thinking.type: "enabled"`）下通过 beta header 启用。Adaptive thinking 模式下自动启用，无需此 header。
 
 ### Prompt Caching
+
+缓存重复使用的 system prompt、工具定义等，避免重复计算 token。适用于多轮对话、长 system prompt、频繁调用相同工具集的场景，可显著降低延迟和成本。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)
 - **Bedrock**: InvokeModel API 下 `cache_control` 格式与 Anthropic 一致；Converse API 通过 `cachePoint` 机制支持，需做转换。TTL 支持 5m 和 1h。
 
 ### Vision（多模态）
+
+让 Claude 理解和分析图像内容。适用于图表解读、OCR、UI 截图分析、图像描述等场景。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/vision](https://docs.anthropic.com/en/build-with-claude/vision)
 - **Bedrock**: 支持 base64 编码图像输入（JPEG, PNG, GIF, WebP）。
 
 ### PDF Support
+
+直接传入 PDF 文档让 Claude 阅读和分析。适用于文档摘要、合同审查、论文分析等场景，无需预处理提取文本。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/pdf-support](https://docs.anthropic.com/en/build-with-claude/pdf-support)
 - **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-runtime_example_bedrock-runtime_DocumentUnderstanding_AnthropicClaude_section.html](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-runtime_example_bedrock-runtime_DocumentUnderstanding_AnthropicClaude_section.html) — 支持 document content block。
 
 ### Citations
+
+Claude 在回答中引用来源文档的具体位置。适用于需要溯源验证的场景（RAG、文档问答、研究报告）。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/citations](https://docs.anthropic.com/en/build-with-claude/citations)
 - **Bedrock**: Converse API 支持。
 
 ### Structured Outputs
+
+强制 Claude 输出符合指定 JSON Schema 的结构化数据。适用于数据提取、表单填充、API 响应生成等需要严格格式的场景。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/structured-outputs](https://docs.anthropic.com/en/build-with-claude/structured-outputs)
 - **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html)
 
 ### Fine-grained Tool Streaming
+
+流式传输工具调用参数，跳过 JSON 缓冲验证，降低工具调用的首 chunk 延迟。适用于需要快速展示工具调用权限提示的交互式应用（如 Claude Code）。
+
 - **Anthropic**: [https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming](https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming)
 - **Bedrock**: 全平台支持（GA，无需 beta header）
-- 已从 beta 转为 GA。启用方式：在工具定义中设置 `"eager_input_streaming": true`，不再需要 beta header。流式传输工具参数时跳过 JSON 缓冲验证，降低首 chunk 延迟。注意可能收到不完整的 JSON，需客户端处理。
-- **实际影响**：Bedrock 默认缓冲整个 tool_use JSON 块，导致工具调用延迟 10-20 秒（尤其影响 Claude Code 的权限提示体验）。启用 `eager_input_streaming` 后延迟降至 1-3 秒。详见 [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
+- 启用方式：在工具定义中设置 `"eager_input_streaming": true`。注意可能收到不完整的 JSON，需客户端处理。
+- **实际影响**：Bedrock 默认缓冲整个 tool_use JSON 块，导致工具调用延迟 10-20 秒。启用后降至 1-3 秒。详见 [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
 
 ### Compaction
+
+自动压缩对话历史以适应上下文窗口。适用于长对话或 Agent 循环中上下文逐渐膨胀的场景，避免超出 context window 限制。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/compaction](https://docs.anthropic.com/en/build-with-claude/compaction)
 - **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-compaction.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-compaction.html)
 - Beta header `compact-2026-01-12` 直接透传。
 
 ### Context Editing
+
+编辑对话上下文中的特定消息，无需重新发送整个对话历史。适用于需要修正或更新历史消息的场景。
+
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/context-editing](https://docs.anthropic.com/en/build-with-claude/context-editing)
 - **Bedrock**: Beta header `context-management-2025-06-27` 直接透传。
 
@@ -121,6 +163,8 @@
 
 
 ### 1. Tool Search Tool
+
+让 Claude 从大量工具（最多 10,000 个）中动态发现和加载所需工具，而非一次性加载所有工具定义。适用于 MCP 多服务器集成、大型工具库等工具数量超过 30-50 个导致选择准确率下降的场景。
 
 | 维度 | 说明 |
 |------|------|
@@ -146,6 +190,8 @@
 
 ### 2. Tool Input Examples (input_examples)
 
+为工具定义提供示例输入，帮助 Claude 更好地理解工具的使用方式和参数格式。适用于工具参数复杂或模型经常传错参数的场景。
+
 | 维度 | 说明 |
 |------|------|
 | **Anthropic** | 工具定义中的 `input_examples` 字段，为工具提供示例输入。Beta header: `advanced-tool-use-2025-11-20` |
@@ -165,6 +211,8 @@
 ---
 
 ### 3. Web Search Tool
+
+让 Claude 直接搜索互联网获取实时信息，自动引用来源。适用于需要最新数据的问答、事实核查、市场调研等场景。
 
 | 维度 | 说明 |
 |------|------|
@@ -198,6 +246,8 @@
 
 ### 4. Web Fetch Tool
 
+让 Claude 抓取指定 URL 的完整页面内容（HTML 和 PDF）。适用于需要分析特定网页、阅读文档、提取结构化数据的场景。与 Web Search 不同，这里是抓取已知 URL 而非搜索关键词。
+
 | 维度 | 说明 |
 |------|------|
 | **Anthropic** | `web_fetch_20250910`（基础版）/ `web_fetch_20260209`（动态过滤版）。Server-side tool，抓取指定 URL 完整内容。无额外费用。支持 HTML 和 PDF |
@@ -224,6 +274,8 @@
 ---
 
 ### 5. Code Execution Tool
+
+让 Claude 在安全沙箱中执行 Bash 命令和文件操作。适用于数据分析、图表生成、复杂计算、文件处理等需要实际运行代码的场景。也是 Web Search/Fetch 动态过滤和 PTC 的基础依赖。
 
 | 维度 | 说明 |
 |------|------|
@@ -254,6 +306,8 @@
 ---
 
 ### 6. Programmatic Tool Calling (PTC)
+
+让 Claude 编写 Python 代码在沙箱中批量调用客户端工具，减少模型往返次数。适用于需要循环调用多个工具、过滤大量数据、条件分支执行等复杂 Agent 工作流。
 
 | 维度 | 说明 |
 |------|------|
@@ -286,6 +340,8 @@
 
 ### 7. Files API
 
+上传文件后通过 `file_id` 在多次请求中复用，避免每次请求重复传输大文件。适用于需要反复引用同一文档/图片的多轮对话，或配合 Code Execution 上传数据集进行分析。
+
 | 维度 | 说明 |
 |------|------|
 | **Anthropic** | Beta header: `files-api-2025-04-14`。独立文件管理端点（上传/下载/列表/删除）。通过 `file_id` 在多次请求中复用。单文件最大 500MB，组织总存储 100GB |
@@ -311,6 +367,8 @@
 ---
 
 ### 8. Batch Processing
+
+异步批量处理大量请求，享受 50% 折扣。适用于大规模数据标注、批量文档处理、评测跑分等不需要实时响应的场景。
 
 | 维度 | 说明 |
 |------|------|
@@ -342,6 +400,8 @@
 
 ### 9. Token Counting
 
+在发送请求前预估 token 用量。适用于需要精确控制成本、预判是否超出 context window、或实现 token 预算管理的场景。
+
 | 维度 | 说明 |
 |------|------|
 | **Anthropic** | `POST /v1/messages/count_tokens`。发送前预估 token 用量 |
@@ -367,6 +427,8 @@
 ---
 
 ### 10. MCP Connector
+
+在 API 请求中直接连接远程 MCP 服务器，无需客户端实现 MCP 协议。适用于需要在服务端集成多个 MCP 工具源（如 GitHub、Slack、数据库等）的场景。
 
 | 维度 | 说明 |
 |------|------|
@@ -398,6 +460,8 @@
 
 ### 11. Memory Tool
 
+让 Claude 在对话中持久化记忆，跨会话记住用户偏好和上下文。适用于个性化助手、长期客户服务等需要跨对话保持状态的场景。
+
 | 维度 | 说明 |
 |------|------|
 | **Anthropic** | `memory_20250801`。Claude 可在对话中持久化记忆 |
@@ -424,6 +488,8 @@
 ---
 
 ### 12. Bash Tool / Computer Use Tool / Text Editor Tool
+
+让 Claude 直接执行 bash 命令、操作计算机界面（鼠标/键盘）、编辑文件。适用于自动化运维、UI 测试、代码编辑等需要 Claude 直接操作计算机环境的 Agent 场景。
 
 | 维度 | 说明 |
 |------|------|
@@ -454,6 +520,8 @@
 ---
 
 ### 13. Agent Skills
+
+模块化能力扩展包，包含指令、脚本和资源文件。适用于为 Claude 添加可复用的专业能力（如数据分析流程、特定领域的工作流模板）。
 
 | 维度 | 说明 |
 |------|------|
