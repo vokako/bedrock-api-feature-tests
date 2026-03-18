@@ -1,0 +1,6 @@
+[project]
+name = "bedrock-api-feature-tests"
+version = "0.1.0"
+description = "Verify Anthropic API features on AWS Bedrock InvokeModel API"
+requires-python = ">=3.12"
+dependencies = ["boto3"]
