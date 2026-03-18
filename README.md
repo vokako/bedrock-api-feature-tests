@@ -54,3 +54,8 @@ uv run python test_01_messages_basic.py
 Edit `helpers.py` to change:
 - `REGION` — AWS region (default: `us-east-1`)
 - `MODEL_ID` — Bedrock model ID (default: `global.anthropic.claude-sonnet-4-6`)
+
+## Documentation
+
+- [ANTHROPIC_VS_BEDROCK_CN.md](ANTHROPIC_VS_BEDROCK_CN.md) — 中文版：Anthropic API 各特性在 Bedrock 上的支持情况
+- [ANTHROPIC_VS_BEDROCK_EN.md](ANTHROPIC_VS_BEDROCK_EN.md) — English: Anthropic API Feature Compatibility on AWS Bedrock
