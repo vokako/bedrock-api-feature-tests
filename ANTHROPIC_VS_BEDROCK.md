@@ -557,7 +557,7 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://do
 
 | Beta Header | 功能 |
 |------------|------|
-| `interleaved-thinking-2025-05-14` | Adaptive Thinking |
+| `interleaved-thinking-2025-05-14` | Interleaved Thinking（手动 extended thinking 模式下启用工具间思考） |
 | `context-management-2025-06-27` | Context Editing |
 | `compact-2026-01-12` | Compaction |
 
