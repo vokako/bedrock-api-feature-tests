@@ -571,13 +571,25 @@ Skills 本质上是对 Code Execution + System Prompt 的结构化封装。
 
 Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://docs.anthropic.com/en/api/beta-headers](https://docs.anthropic.com/en/api/beta-headers)）。在 Bedrock 上需分类处理：
 
-### 直接透传（Bedrock 支持相同 header）
+### 直接透传（Bedrock 接受的 beta header）
 
-| Beta Header | 功能 |
-|------------|------|
-| `interleaved-thinking-2025-05-14` | Interleaved Thinking（手动 extended thinking 模式下启用工具间思考） |
-| `context-management-2025-06-27` | Context Editing |
-| `compact-2026-01-12` | Compaction |
+以下 beta header 在 Bedrock InvokeModel API 上被接受（不会报 "invalid beta flag" 错误）：
+
+| Beta Header | 功能 | 实际可用 |
+|------------|------|:---:|
+| `interleaved-thinking-2025-05-14` | Interleaved Thinking | ✅ 已验证 |
+| `context-management-2025-06-27` | Context Editing | ✅ 已验证 |
+| `compact-2026-01-12` | Compaction | ✅ 已验证 |
+| `fine-grained-tool-streaming-2025-05-14` | Fine-grained Tool Streaming（已 GA，可用 `eager_input_streaming` 替代） | ✅ 已验证 |
+| `tool-examples-2025-10-29` | Tool Input Examples | ✅ 已验证 |
+| `tool-search-tool-2025-10-19` | Tool Search | ✅ 已验证 |
+| `computer-use-2025-01-24` | Computer Use（bash + text editor） | ⚠️ bash/text_editor 可用，computer 不可用 |
+| `computer-use-2024-10-22` | Computer Use（旧版） | ⚠️ 同上 |
+| `mcp-client-2025-11-20` | MCP Connector | ⚠️ header 被接受，`mcp_servers` 字段可解析，但实际连接 MCP 服务器失败 |
+| `token-counting-2024-11-01` | Token Counting | ⚠️ header 被接受，但 InvokeModel 不是 count_tokens 端点 |
+| `pdfs-2024-09-25` | PDF Support（旧版 beta） | ✅ PDF 已 GA |
+| `output-128k-2025-02-19` | 128k Output | ✅ 已 GA |
+| `web-search-2025-03-05` | Web Search | ⚠️ header 被接受，但 Bedrock 无搜索后端 |
 
 ### 需要映射（Bedrock 用不同 header 名称）
 
@@ -590,16 +602,19 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://do
 
 参考实现: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py)
 
-### Bedrock 不支持（需过滤或代理端处理）
+### Bedrock 明确拒绝的 beta header（报 "invalid beta flag"）
 
 | Beta Header | 功能 |
 |------------|------|
-| `files-api-2025-04-14` | Files API |
-| `computer-use-2025-01-24` | Computer Use / Bash / Text Editor |
-| `mcp-client-2025-11-20` | MCP Connector |
-| `code-execution-2025-08-25` | Code Execution |
 | `prompt-caching-scope-2026-01-05` | Prompt Caching Scope |
 | `redact-thinking-2026-02-12` | Thinking 内容脱敏 |
+| `files-api-2025-04-14` | Files API |
+| `code-execution-2025-05-22` | Code Execution（旧版） |
+| `code-execution-2025-08-25` | Code Execution |
+| `max-tokens-3-5-sonnet-2024-07-15` | Max Tokens 3.5 Sonnet |
+| `message-batches-2024-09-24` | Message Batches |
+| `web-fetch-2025-09-10` | Web Fetch |
+| `advanced-tool-use-2025-11-20` | Advanced Tool Use（Anthropic 侧的聚合 header） |
 
 参考实现: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py)
 
