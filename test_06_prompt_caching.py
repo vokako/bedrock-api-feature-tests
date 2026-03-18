@@ -1,5 +1,6 @@
 """Test 06: Prompt Caching — cache_control with ephemeral TTL."""
 from helpers import invoke, print_header, print_pass, print_fail
+import json
 
 print_header("06", "Prompt Caching (cache_control)")
 
@@ -20,18 +21,16 @@ try:
     })
     u2 = resp2.get("usage", {})
 
+    print(f"  Req 1 usage: {json.dumps(u1, indent=4)}")
+    print(f"  Req 2 usage: {json.dumps(u2, indent=4)}")
+
+    has_cache_fields = "cache_creation_input_tokens" in u1
     cw1 = u1.get("cache_creation_input_tokens", 0)
     cr2 = u2.get("cache_read_input_tokens", 0)
-    print(f"  Req 1 — cache_creation: {cw1}, cache_read: {u1.get('cache_read_input_tokens', 0)}")
-    print(f"  Req 2 — cache_creation: {u2.get('cache_creation_input_tokens', 0)}, cache_read: {cr2}")
-    print(f"  Req 1 full usage: {u1}")
 
-    # cache_control is accepted (no error), and cache fields are present in usage
-    has_cache_fields = "cache_creation_input_tokens" in u1
     if cw1 > 0 or cr2 > 0:
         print_pass("Prompt Caching (cache hit/write confirmed)")
     elif has_cache_fields:
-        # Global endpoints accept cache_control but may not report metrics
         print_pass("Prompt Caching (cache_control accepted, fields present — global endpoint may not report cache metrics)")
     else:
         print_fail("Prompt Caching", "cache fields not present in usage")

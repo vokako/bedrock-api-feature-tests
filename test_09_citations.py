@@ -1,5 +1,6 @@
 """Test 09: Citations — document citations in response."""
 from helpers import invoke, print_header, print_pass, print_fail
+import json
 
 print_header("09", "Citations")
 
@@ -20,12 +21,18 @@ try:
         }],
     })
     content = resp.get("content", [])
-    has_citation = any(b.get("citations") for b in content if b.get("type") == "text")
-    for b in content:
+    has_citation = False
+    print(f"  content blocks ({len(content)}):")
+    for i, b in enumerate(content):
         if b.get("type") == "text":
-            print(f"  Text: {b.get('text', '')[:80]}")
+            print(f"    [{i}] text: \"{b.get('text', '')}\"")
             if b.get("citations"):
-                print(f"  Citation found: {b['citations'][0].get('type', '')}")
+                has_citation = True
+                for ci, c in enumerate(b["citations"]):
+                    print(f"         citation[{ci}]: type={c.get('type')}, cited_text=\"{c.get('cited_text', '')[:60]}\"")
+                    if c.get("document_title"):
+                        print(f"                     document_title=\"{c['document_title']}\"")
+
     if has_citation:
         print_pass("Citations")
     else:

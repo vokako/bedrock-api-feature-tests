@@ -21,14 +21,30 @@ try:
         }],
         "messages": [{"role": "user", "content": "Write a 4-line poem and save it to poem.txt using make_file."}],
     })
-    input_deltas = [
-        c for c in chunks
-        if c.get("type") == "content_block_delta" and c.get("delta", {}).get("type") == "input_json_delta"
-    ]
+
+    print("  --- Stream replay ---")
+    input_deltas = []
+    for c in chunks:
+        t = c.get("type")
+        if t == "content_block_start":
+            cb = c.get("content_block", {})
+            print(f"  [block_start] type={cb.get('type')} name={cb.get('name', '')}")
+        elif t == "content_block_delta":
+            d = c.get("delta", {})
+            if d.get("type") == "input_json_delta":
+                pj = d.get("partial_json", "")
+                input_deltas.append(pj)
+                print(f"  [input_json_delta] \"{pj[:80]}\"")
+            elif d.get("type") == "text_delta":
+                print(f"  [text_delta] \"{d.get('text', '')[:80]}\"")
+        elif t == "content_block_stop":
+            print(f"  [block_stop]")
+
+    print(f"\n  Total input_json_delta chunks: {len(input_deltas)}")
+    full_json = "".join(input_deltas)
+    print(f"  Assembled JSON ({len(full_json)} chars): {full_json[:200]}")
+
     assert len(input_deltas) > 0, "no input_json_delta chunks"
-    partial = "".join(d["delta"]["partial_json"] for d in input_deltas)
-    print(f"  input_json_delta chunks: {len(input_deltas)}")
-    print(f"  Partial JSON (first 120): {partial[:120]}")
     print_pass("eager_input_streaming")
 except Exception as e:
     print_fail("eager_input_streaming", str(e))

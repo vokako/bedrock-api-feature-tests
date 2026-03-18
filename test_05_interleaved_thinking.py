@@ -1,9 +1,6 @@
-"""Test 05: Interleaved Thinking — thinking between tool calls via beta header.
-
-This tests the interleaved-thinking-2025-05-14 beta header, which enables
-thinking blocks between tool calls in manual extended thinking mode.
-"""
+"""Test 05: Interleaved Thinking — thinking between tool calls via beta header."""
 from helpers import invoke, print_header, print_pass, print_fail
+import json
 
 print_header("05", "Interleaved Thinking (interleaved-thinking beta)")
 
@@ -27,7 +24,18 @@ try:
     )
     content = resp.get("content", [])
     types = [b.get("type") for b in content]
-    print(f"  Content block types: {types}")
+    print(f"  stop_reason: {resp.get('stop_reason')}")
+    print(f"  content block types: {types}")
+    print()
+    for i, b in enumerate(content):
+        btype = b.get("type")
+        if btype == "thinking":
+            print(f"    [{i}] thinking: \"{b.get('thinking', '')[:80]}...\"")
+        elif btype == "text":
+            print(f"    [{i}] text: \"{b.get('text', '')[:80]}\"")
+        elif btype == "tool_use":
+            print(f"    [{i}] tool_use: name={b['name']}, input={json.dumps(b['input'])}")
+
     assert "thinking" in types, "no thinking block"
     assert "tool_use" in types, "no tool_use block"
     print_pass("Interleaved Thinking")
