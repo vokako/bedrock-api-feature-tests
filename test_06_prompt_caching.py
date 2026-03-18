@@ -1,10 +1,13 @@
 """Test 06: Prompt Caching — cache_control with ephemeral TTL."""
 from helpers import invoke, print_header, print_pass, print_fail
 import json
+import uuid
 
 print_header("06", "Prompt Caching (cache_control)")
 
-LONG_SYSTEM = ("You are a helpful assistant who specializes in software engineering. " * 100)
+# Add a unique nonce so each test run gets a fresh cache entry
+nonce = uuid.uuid4().hex[:8]
+LONG_SYSTEM = f"You are a helpful assistant. Session: {nonce}. " + ("You specialize in software engineering and cloud architecture. " * 100)
 
 try:
     resp1 = invoke({
