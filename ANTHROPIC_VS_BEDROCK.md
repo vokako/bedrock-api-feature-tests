@@ -20,7 +20,8 @@
 | Streaming (SSE) | ✅ | ✅ | ✅ | 无 | [test_02](test_02_streaming.py) |
 | Tool Use | ✅ | ✅ | ✅ | 无 | [test_03](test_03_tool_use.py) |
 | Extended Thinking | ✅ | ✅ | ✅ | 无 | [test_04](test_04_extended_thinking.py) |
-| Adaptive Thinking | ✅ | ✅ | ✅ | 无 | [test_05](test_05_adaptive_thinking.py) |
+| Adaptive Thinking | ✅ | ✅ | ✅ | 无 | [test_16](test_16_adaptive_thinking.py) |
+| Interleaved Thinking | ✅ | ✅ | ✅ | 无 | [test_05](test_05_interleaved_thinking.py) |
 | Prompt Caching | ✅ | ✅ | ✅ | 无 | [test_06](test_06_prompt_caching.py) |
 | Vision | ✅ | ✅ | ✅ | 无 | [test_07](test_07_vision.py) |
 | PDF Support | ✅ | ✅ | ✅ | 无 | [test_08](test_08_pdf_support.py) |
@@ -72,7 +73,12 @@
 ### Adaptive Thinking
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/adaptive-thinking](https://docs.anthropic.com/en/build-with-claude/adaptive-thinking)
 - **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html)
-- Beta header `interleaved-thinking-2025-05-14` 直接透传。
+- `thinking: {type: "adaptive"}` — Claude 动态决定是否思考及思考深度。无需 beta header。仅 Opus 4.6 / Sonnet 4.6 支持。自动启用 interleaved thinking。可配合 `output_config.effort`（`max`/`high`/`medium`/`low`）控制思考程度。
+
+### Interleaved Thinking
+- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking)
+- **Bedrock**: Beta header `interleaved-thinking-2025-05-14` 直接透传。
+- 在手动 extended thinking 模式（`thinking.type: "enabled"`）下，通过 beta header 启用工具调用之间的思考。Adaptive thinking 模式下自动启用，无需此 header。
 
 ### Prompt Caching
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)

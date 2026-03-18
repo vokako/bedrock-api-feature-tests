@@ -34,7 +34,7 @@ uv run python test_01_messages_basic.py
 | 02 | `test_02_streaming.py` | Streaming (SSE) | — |
 | 03 | `test_03_tool_use.py` | Tool Use (Function Calling) | — |
 | 04 | `test_04_extended_thinking.py` | Extended Thinking | — |
-| 05 | `test_05_adaptive_thinking.py` | Adaptive Thinking | `interleaved-thinking-2025-05-14` |
+| 05 | `test_05_interleaved_thinking.py` | Interleaved Thinking | `interleaved-thinking-2025-05-14` |
 | 06 | `test_06_prompt_caching.py` | Prompt Caching | — |
 | 07 | `test_07_vision.py` | Vision (Multimodal Image) | — |
 | 08 | `test_08_pdf_support.py` | PDF Support | — |
@@ -45,6 +45,7 @@ uv run python test_01_messages_basic.py
 | 13 | `test_13_context_editing.py` | Context Editing | `context-management-2025-06-27` |
 | 14 | `test_14_tool_search.py` | Tool Search | `tool-search-tool-2025-10-19` |
 | 15 | `test_15_tool_input_examples.py` | Tool Input Examples | `tool-examples-2025-10-29` |
+| 16 | `test_16_adaptive_thinking.py` | Adaptive Thinking | — (`thinking.type: "adaptive"` + `effort`) |
 
 ## Configuration
 

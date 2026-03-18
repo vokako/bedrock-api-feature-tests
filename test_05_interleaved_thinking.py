@@ -1,7 +1,11 @@
-"""Test 05: Adaptive Thinking — interleaved thinking with tool use."""
+"""Test 05: Interleaved Thinking — thinking between tool calls via beta header.
+
+This tests the interleaved-thinking-2025-05-14 beta header, which enables
+thinking blocks between tool calls in manual extended thinking mode.
+"""
 from helpers import invoke, print_header, print_pass, print_fail
 
-print_header("05", "Adaptive Thinking (interleaved-thinking)")
+print_header("05", "Interleaved Thinking (interleaved-thinking beta)")
 
 try:
     resp = invoke(
@@ -26,6 +30,6 @@ try:
     print(f"  Content block types: {types}")
     assert "thinking" in types, "no thinking block"
     assert "tool_use" in types, "no tool_use block"
-    print_pass("Adaptive Thinking")
+    print_pass("Interleaved Thinking")
 except Exception as e:
-    print_fail("Adaptive Thinking", str(e))
+    print_fail("Interleaved Thinking", str(e))
