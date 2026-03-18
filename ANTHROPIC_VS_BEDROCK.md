@@ -104,6 +104,7 @@
 - **Anthropic**: [https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming](https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming)
 - **Bedrock**: 全平台支持（GA，无需 beta header）
 - 已从 beta 转为 GA。启用方式：在工具定义中设置 `"eager_input_streaming": true`，不再需要 beta header。流式传输工具参数时跳过 JSON 缓冲验证，降低首 chunk 延迟。注意可能收到不完整的 JSON，需客户端处理。
+- **实际影响**：Bedrock 默认缓冲整个 tool_use JSON 块，导致工具调用延迟 10-20 秒（尤其影响 Claude Code 的权限提示体验）。启用 `eager_input_streaming` 后延迟降至 1-3 秒。详见 [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
 
 ### Compaction
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/compaction](https://docs.anthropic.com/en/build-with-claude/compaction)
@@ -416,7 +417,8 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://do
 1. **丢弃 beta headers**：SDK 移除部分 beta header，导致 Extended Thinking、Adaptive Thinking 等功能行为与官方 API 不一致
 2. **max_tokens 自动裁剪**：已知问题 [https://github.com/anthropics/claude-code/issues/8756](https://github.com/anthropics/claude-code/issues/8756)
 3. **功能降级**：部分高级特性（如 PTC、Web Search）在直连 Bedrock 时不可用
+4. **tool_use 权限提示延迟 10-20 秒**：Claude Code 未在工具定义中设置 `eager_input_streaming: true`，导致 Bedrock 缓冲整个 tool_use JSON 块后才返回给客户端。直连 Anthropic API 时权限提示约 1-3 秒出现，Bedrock 上需 10-20 秒。该特性已 GA，全平台支持，仅需在工具定义中添加 `"eager_input_streaming": true` 即可解决。详见 [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
 
-**Workaround**：通过代理伪装为 Anthropic 官方 API（设置 `CLAUDE_CODE_USE_BEDROCK=0` + 自定义 `ANTHROPIC_BASE_URL`），让 SDK 保持完整的 beta header 和行为。
+**Workaround**：通过代理伪装为 Anthropic 官方 API（设置 `CLAUDE_CODE_USE_BEDROCK=0` + 自定义 `ANTHROPIC_BASE_URL`），让 SDK 保持完整的 beta header 和行为。对于 `eager_input_streaming` 问题，代理层可在转发请求时自动为所有工具定义注入 `"eager_input_streaming": true`。
 
 参考实现: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py) — 请求入口，处理模型 ID 映射和 beta header 转换
