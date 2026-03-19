@@ -1,6 +1,6 @@
 <div align="center">
 
-# Anthropic API on AWS Bedrock
+# Anthropic API on Amazon Bedrock
 
 **Complete feature compatibility guide with verification tests**
 
@@ -10,7 +10,7 @@
 
 ---
 
-This document provides a comprehensive mapping of every Anthropic Messages API feature to AWS Bedrock. Each feature is categorized as:
+This document provides a comprehensive mapping of every Anthropic Messages API feature to Amazon Bedrock. Each feature is categorized as:
 
 - ✅ **Natively supported** — works out of the box on Bedrock
 - ⚠️ **Supported with differences** — works on Bedrock but requires specific API or header configuration

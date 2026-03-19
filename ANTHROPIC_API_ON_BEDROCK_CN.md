@@ -1,8 +1,8 @@
 <div align="center">
 
-# Anthropic API on AWS Bedrock
+# Anthropic API on Amazon Bedrock
 
-**Anthropic API 各特性在 AWS Bedrock 上的支持情况**
+**Anthropic API 各特性在 Amazon Bedrock 上的支持情况**
 
 [English Version](ANTHROPIC_API_ON_BEDROCK_EN.md)
 
@@ -10,7 +10,7 @@
 
 ---
 
-本文档逐一梳理 Anthropic Messages API 的每个特性，说明其在 AWS Bedrock 上的原生支持状态。对于 Bedrock 尚未内置的 Anthropic 特有特性，说明如何通过代理层或应用层自行实现。
+本文档逐一梳理 Anthropic Messages API 的每个特性，说明其在 Amazon Bedrock 上的原生支持状态。对于 Bedrock 尚未内置的 Anthropic 特有特性，说明如何通过代理层或应用层自行实现。
 
 ---
 
