@@ -1,374 +1,400 @@
 <div align="center">
 
-# Anthropic API Feature Compatibility on AWS Bedrock
+# Anthropic API on AWS Bedrock
 
-**Mapping Anthropic API features to AWS Bedrock with implementation guidance**
+**Complete feature compatibility guide with verification tests**
+
+[中文版](ANTHROPIC_API_ON_BEDROCK_CN.md)
 
 </div>
 
 ---
 
-This document maps each Anthropic Messages API feature to its Bedrock equivalent. For Anthropic-specific features not yet built into Bedrock, it provides implementation guidance using a proxy layer or application layer.
+This document provides a comprehensive mapping of every Anthropic Messages API feature to AWS Bedrock. Each feature is categorized as:
+
+- ✅ **Natively supported** — works out of the box on Bedrock
+- ⚠️ **Supported with differences** — works on Bedrock but requires specific API or header configuration
+- 🔧 **Proxy implementation required** — not built into Bedrock, but can be implemented via a proxy/application layer
+
+All ✅ features have been **verified with test scripts** against Bedrock InvokeModel API using `global.anthropic.claude-sonnet-4-6`.
 
 ---
 
-> 📌 All features marked ✅ have been verified against Bedrock InvokeModel API (Sonnet 4.6) with corresponding test scripts.
+## Background: Two Ways to Call Claude on Bedrock
+
+Bedrock provides two APIs for calling Claude models:
+
+| | InvokeModel API | Converse API |
+|---|---|---|
+| **Format** | Identical to Anthropic's native API | Bedrock's unified format (works across all Bedrock models) |
+| **Conversion needed** | None — same request/response JSON structure | Yes — requires Anthropic ↔ Bedrock format conversion |
+| **Beta headers** | Supported via `anthropic_beta` field in request body | Limited support via `additionalModelRequestFields` |
+| **Feature coverage** | Full (all Claude features available) | Most features, but some advanced ones (Tool Search, Tool Input Examples) are not available |
+
+**Recommendation**: Use InvokeModel API for maximum feature compatibility with the Anthropic ecosystem. Use Converse API when you need a unified interface across multiple model providers.
+
+---
 
 ## Overview
 
-| Feature | Anthropic API | Bedrock Converse | Bedrock Invoke | Notes | Test |
-|------|:---:|:---:|:---:|:---:|:---:|
-| Messages API | ✅ | ✅ | ✅ | — | [test_01](test_01_messages_basic.py) |
-| Streaming (SSE) | ✅ | ✅ | ✅ | — | [test_02](test_02_streaming.py) |
-| Tool Use | ✅ | ✅ | ✅ | — | [test_03](test_03_tool_use.py) |
-| Extended Thinking | ✅ | ✅ | ✅ | — | [test_04](test_04_extended_thinking.py) |
-| Adaptive Thinking | ✅ | ✅ | ✅ | — | [test_16](test_16_adaptive_thinking.py) |
-| Interleaved Thinking | ✅ | ✅ | ✅ | — | [test_05](test_05_interleaved_thinking.py) |
-| Prompt Caching | ✅ | ✅ | ✅ | — | [test_06](test_06_prompt_caching.py) |
-| Vision | ✅ | ✅ | ✅ | — | [test_07](test_07_vision.py) |
-| PDF Support | ✅ | ✅ | ✅ | — | [test_08](test_08_pdf_support.py) |
-| Citations | ✅ | ✅ | ✅ | — | [test_09](test_09_citations.py) |
-| Structured Outputs | ✅ | ✅ | ✅ | — | [test_10](test_10_structured_outputs.py) |
-| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | — | [test_11](test_11_eager_input_streaming.py) |
-| Compaction | ✅ | ✅ | ✅ | — | [test_12](test_12_compaction.py) |
-| Context Editing | ✅ | ✅ | ✅ | — | [test_13](test_13_context_editing.py) |
+| Feature | Anthropic | Bedrock Converse | Bedrock Invoke | Status | Test |
+|---------|:---------:|:----------------:|:--------------:|--------|------|
+| Messages API | ✅ | ✅ | ✅ | Natively supported | [test_01](test_01_messages_basic.py) |
+| Streaming (SSE) | ✅ | ✅ | ✅ | Natively supported | [test_02](test_02_streaming.py) |
+| Tool Use (Function Calling) | ✅ | ✅ | ✅ | Natively supported | [test_03](test_03_tool_use.py) |
+| Extended Thinking | ✅ | ✅ | ✅ | Natively supported | [test_04](test_04_extended_thinking.py) |
+| Adaptive Thinking | ✅ | ✅ | ✅ | Natively supported | [test_16](test_16_adaptive_thinking.py) |
+| Interleaved Thinking | ✅ | ✅ | ✅ | Natively supported | [test_05](test_05_interleaved_thinking.py) |
+| Prompt Caching | ✅ | ✅ | ✅ | Natively supported | [test_06](test_06_prompt_caching.py) |
+| Vision (Multimodal) | ✅ | ✅ | ✅ | Natively supported | [test_07](test_07_vision.py) |
+| PDF Support | ✅ | ✅ | ✅ | Natively supported | [test_08](test_08_pdf_support.py) |
+| Citations | ✅ | ✅ | ✅ | Natively supported | [test_09](test_09_citations.py) |
+| Structured Outputs | ✅ | ✅ | ✅ | Natively supported | [test_10](test_10_structured_outputs.py) |
+| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | Natively supported | [test_11](test_11_eager_input_streaming.py) |
+| Compaction | ✅ | ✅ | ✅ | Natively supported | [test_12](test_12_compaction.py) |
+| Context Editing | ✅ | ✅ | ✅ | Natively supported | [test_13](test_13_context_editing.py) |
+| Bash Tool | ✅ | ✅ | ✅ | Natively supported | [test_17](test_17_bash_tool.py) |
+| Text Editor Tool | ✅ | ✅ | ✅ | Name mapping required | [test_18](test_18_text_editor_tool.py) |
 | Tool Search | ✅ | ❌ | ✅ | InvokeModel API only | [test_14](test_14_tool_search.py) |
 | Tool Input Examples | ✅ | ❌ | ✅ | InvokeModel API only | [test_15](test_15_tool_input_examples.py) |
-| Web Search Tool | ✅ | ❌ | ❌ | Proxy impl. required |
-| Web Fetch Tool | ✅ | ❌ | ❌ | Proxy impl. required |
-| Code Execution Tool | ✅ | ❌ | ❌ | Proxy impl. required |
-| Programmatic Tool Calling | ✅ | ❌ | ❌ | Proxy impl. required |
-| Files API | ✅ | ❌ | ❌ | Proxy impl. required |
-| Batch Processing | ✅ | ❌ | ❌ | Proxy impl. required |
-| Token Counting | ✅ | ❌ | ❌ | Proxy impl. required |
-| MCP Connector | ✅ | ❌ | ❌ | Proxy impl. required |
-| Memory Tool | ✅ | ❌ | ❌ | Proxy impl. required |
-| Bash Tool | ✅ | ✅ | ✅ | — | [test_17](test_17_bash_tool.py) |
-| Text Editor Tool | ✅ | ✅ | ✅ | Name mapping | [test_18](test_18_text_editor_tool.py) |
-| Computer Use Tool | ✅ | ❌ | ❌ | Proxy impl. required |
-| Agent Skills | ✅ | ❌ | ❌ | Proxy impl. required |
+| Web Search Tool | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| Web Fetch Tool | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| Code Execution Tool | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| Programmatic Tool Calling | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| Files API | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| Batch Processing | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| Token Counting | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| MCP Connector | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| Memory Tool | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| Computer Use Tool | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| Agent Skills | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+
+**Summary**: 18 out of 29 features are natively supported on Bedrock. The remaining 11 can be implemented via a proxy layer — a reference implementation is available at [anthropic_api_converter](https://github.com/xiehust/anthropic_api_converter).
 
 ---
 
-## Natively Supported on Bedrock
-
-The following features are fully supported on Bedrock. The InvokeModel API is format-equivalent to the Anthropic API (same request/response structure, only requiring the `anthropic_version` field and authentication changes) — no format conversion needed. The Converse API uses a different format and requires Anthropic ↔ Bedrock conversion.
+## Natively Supported Features
 
 ### Messages API
 
-Core conversation interface for Claude, supporting multi-turn dialogue, system prompts, and assistant prefill.
+**What it does**: Core conversation interface for Claude — multi-turn dialogue, system prompts, assistant prefill. Every Claude interaction goes through this API.
 
-- **Anthropic**: [https://docs.anthropic.com/en/api/messages](https://docs.anthropic.com/en/api/messages)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html)
-- InvokeModel API is format-equivalent — direct passthrough. Converse API provides a unified interface but requires format conversion.
+**How it works on Bedrock**: The InvokeModel API accepts the exact same JSON format as the Anthropic API. You only need to add `"anthropic_version": "bedrock-2023-05-31"` and use AWS authentication instead of an API key. The Converse API provides a unified interface across all Bedrock models but uses a different JSON format.
+
+- Anthropic docs: [https://docs.anthropic.com/en/api/messages](https://docs.anthropic.com/en/api/messages)
+- Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html)
 
 ### Streaming (SSE)
 
-Server-sent event stream for token-by-token output. Essential for interactive applications.
+**What it does**: Streams the response token-by-token via Server-Sent Events, so users see output as it's generated rather than waiting for the complete response.
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/streaming](https://docs.anthropic.com/en/build-with-claude/streaming)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html) / ConverseStream
-- InvokeModelWithResponseStream returns SSE events in the same format as Anthropic. ConverseStream uses Bedrock's own format.
+**How it works on Bedrock**: `InvokeModelWithResponseStream` returns SSE events in the same format as the Anthropic API — no conversion needed. `ConverseStream` uses Bedrock's own event format and requires conversion.
+
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/streaming](https://docs.anthropic.com/en/build-with-claude/streaming)
+- Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html)
 
 ### Tool Use (Function Calling)
 
-Enables Claude to call external tools/functions. Core capability for building agents.
+**What it does**: Allows Claude to call external tools/functions (e.g., database queries, API calls, calculations). This is the core building block for AI agents.
 
-- **Anthropic**: [https://docs.anthropic.com/en/agents-and-tools/tool-use/overview](https://docs.anthropic.com/en/agents-and-tools/tool-use/overview)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html)
-- Tool definition format is identical under InvokeModel API. Converse API uses a different schema requiring conversion.
+**How it works on Bedrock**: Tool definitions and tool_use/tool_result blocks are identical under InvokeModel API. The Converse API uses a different tool schema format (`toolSpec` instead of `tools`) that requires conversion.
+
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/overview](https://docs.anthropic.com/en/agents-and-tools/tool-use/overview)
+- Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html)
 
 ### Extended Thinking
 
-Deep reasoning before answering, outputting thinking blocks. Ideal for math, logic, and complex coding.
+**What it does**: Claude performs deep reasoning before answering, producing a `thinking` block that shows its step-by-step thought process. Dramatically improves performance on math, logic, and complex coding tasks.
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/extended-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html)
-- Both Converse and InvokeModel APIs support the `thinking` parameter.
+**How it works on Bedrock**: Both Converse and InvokeModel APIs support the `thinking` parameter with `type: "enabled"` and `budget_tokens`. The response includes `thinking` content blocks just like the Anthropic API.
+
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/extended-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking)
+- Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html)
 
 ### Adaptive Thinking
 
-Claude dynamically determines whether and how much to think. Ideal for workloads with varying complexity.
+**What it does**: Claude dynamically decides whether to think and how deeply, based on task complexity. Unlike Extended Thinking where you set a fixed `budget_tokens`, Adaptive Thinking lets the model allocate thinking resources automatically. You can guide it with the `effort` parameter (`max`/`high`/`medium`/`low`).
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/adaptive-thinking](https://docs.anthropic.com/en/build-with-claude/adaptive-thinking)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html)
-- `thinking: {type: "adaptive"}` — no beta header required. Opus 4.6 / Sonnet 4.6 only. Automatically enables interleaved thinking. Use `output_config.effort` (`max`/`high`/`medium`/`low`) to control thinking depth.
+**How it works on Bedrock**: Set `thinking: {type: "adaptive"}` in the request body. No beta header required. Only available on Opus 4.6 and Sonnet 4.6. Automatically enables interleaved thinking (thinking between tool calls).
+
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/adaptive-thinking](https://docs.anthropic.com/en/build-with-claude/adaptive-thinking)
+- Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html)
 
 ### Interleaved Thinking
 
-Thinking between tool calls. Ideal for multi-step agent scenarios.
+**What it does**: In multi-step agent workflows, Claude thinks between tool calls — not just before the first response. After receiving a tool result, Claude can reason about what to do next before making another tool call. This significantly improves agent decision-making quality.
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking)
-- **Bedrock**: Beta header `interleaved-thinking-2025-05-14` passed through directly.
-- Enabled via beta header in manual mode (`thinking.type: "enabled"`). Automatically enabled in adaptive mode.
+**How it works on Bedrock**: In manual extended thinking mode (`thinking.type: "enabled"`), add the beta header `interleaved-thinking-2025-05-14`. In adaptive thinking mode, interleaved thinking is automatically enabled — no header needed.
+
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking)
 
 ### Prompt Caching
 
-Caches frequently used system prompts and tool definitions. Significantly reduces latency and cost.
+**What it does**: Caches frequently reused content (system prompts, tool definitions, long documents) so it doesn't need to be reprocessed on every request. Reduces latency by up to 85% and input token costs by up to 90% for cached content.
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)
-- **Bedrock**: `cache_control` format is identical under InvokeModel API. Converse API uses `cachePoint` mechanism. TTL supports 5m and 1h.
+**How it works on Bedrock**: Under InvokeModel API, the `cache_control` format is identical to Anthropic. Under Converse API, caching uses the `cachePoint` mechanism instead. TTL supports 5 minutes (default) and 1 hour.
+
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)
 
 ### Vision (Multimodal)
 
-Image understanding and analysis. Useful for chart interpretation, OCR, UI analysis.
+**What it does**: Claude can understand and analyze images — charts, screenshots, photos, diagrams, handwritten text, etc.
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/vision](https://docs.anthropic.com/en/build-with-claude/vision)
-- **Bedrock**: Supports base64-encoded image input (JPEG, PNG, GIF, WebP).
+**How it works on Bedrock**: Pass base64-encoded images in the request body. Supports JPEG, PNG, GIF, and WebP formats. Format is identical under InvokeModel API.
+
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/vision](https://docs.anthropic.com/en/build-with-claude/vision)
 
 ### PDF Support
 
-Direct PDF document analysis without text extraction preprocessing.
+**What it does**: Claude can read and analyze PDF documents directly, including text, tables, charts, and images within the PDF. No need to extract text first.
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/pdf-support](https://docs.anthropic.com/en/build-with-claude/pdf-support)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-runtime_example_bedrock-runtime_DocumentUnderstanding_AnthropicClaude_section.html](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-runtime_example_bedrock-runtime_DocumentUnderstanding_AnthropicClaude_section.html)
+**How it works on Bedrock**: Pass base64-encoded PDF as a `document` content block. Supported on both InvokeModel and Converse APIs.
+
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/pdf-support](https://docs.anthropic.com/en/build-with-claude/pdf-support)
+- Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-runtime_example_bedrock-runtime_DocumentUnderstanding_AnthropicClaude_section.html](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-runtime_example_bedrock-runtime_DocumentUnderstanding_AnthropicClaude_section.html)
 
 ### Citations
 
-Claude cites specific locations in source documents. Essential for RAG and document Q&A.
+**What it does**: Claude cites specific passages from source documents in its responses, with character-level location references. Essential for RAG applications where you need to verify the source of each claim.
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/citations](https://docs.anthropic.com/en/build-with-claude/citations)
-- **Bedrock**: Supported via Converse API.
+**How it works on Bedrock**: Enable citations on document blocks with `citations: {enabled: true}`. Response includes `char_location` citation objects pointing to exact positions in the source document.
+
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/citations](https://docs.anthropic.com/en/build-with-claude/citations)
 
 ### Structured Outputs
 
-Forces Claude to output structured data conforming to a JSON Schema.
+**What it does**: Forces Claude to output data conforming to a specific JSON Schema. Guarantees valid, parseable JSON output every time. Essential for data extraction, form filling, and API response generation.
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/structured-outputs](https://docs.anthropic.com/en/build-with-claude/structured-outputs)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html)
+**How it works on Bedrock**: Use `tool_choice: {type: "tool", name: "..."}` to force a specific tool call, where the tool's `input_schema` defines the desired output structure.
+
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/structured-outputs](https://docs.anthropic.com/en/build-with-claude/structured-outputs)
+- Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html)
 
 ### Fine-grained Tool Streaming
 
-Streams tool call parameters without JSON buffering, reducing first-chunk latency. Essential for fast tool permission prompts.
+**What it does**: When Claude calls a tool during streaming, the tool call parameters are streamed immediately without waiting for JSON validation. This dramatically reduces the time before a client can display a tool permission prompt (e.g., "Allow Bash(git status)?").
 
-- **Anthropic**: [https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming](https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming)
-- **Bedrock**: Supported on all platforms (GA, no beta header required)
-- Enable by setting `"eager_input_streaming": true` on tool definitions.
-- **Practical impact**: Bedrock buffers the entire tool_use JSON block by default, causing 10-20s delays. Enabling this reduces latency to 1-3s. See [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
+**How it works on Bedrock**: Set `"eager_input_streaming": true` on each tool definition. This is now GA on all platforms — no beta header required. Without this, Bedrock buffers the entire tool_use JSON block, causing **10-20 second delays** before the tool call is visible to the client. With it, delays drop to **1-3 seconds**.
+
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming](https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming)
+- Related issue: [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
 
 ### Compaction
 
-Automatically compresses conversation history to fit the context window.
+**What it does**: Automatically compresses conversation history when it approaches the context window limit. Instead of failing with a "context too long" error, Claude summarizes older messages to make room for new ones. Critical for long-running agent loops.
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/compaction](https://docs.anthropic.com/en/build-with-claude/compaction)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-compaction.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-compaction.html)
-- Beta header `compact-2026-01-12` passed through directly.
+**How it works on Bedrock**: Beta header `compact-2026-01-12` is passed through directly.
+
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/compaction](https://docs.anthropic.com/en/build-with-claude/compaction)
+- Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-compaction.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-compaction.html)
 
 ### Context Editing
 
-Edit specific messages in conversation context without resending the entire history.
+**What it does**: Modify specific messages in the conversation history without resending everything. Useful for correcting mistakes or updating information mid-conversation.
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/context-editing](https://docs.anthropic.com/en/build-with-claude/context-editing)
-- **Bedrock**: Beta header `context-management-2025-06-27` passed through directly.
+**How it works on Bedrock**: Beta header `context-management-2025-06-27` is passed through directly.
 
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/context-editing](https://docs.anthropic.com/en/build-with-claude/context-editing)
+
+### Bash Tool
+
+**What it does**: A client-side tool that lets Claude generate bash commands for the client to execute. The model produces `tool_use` blocks with bash commands; the client runs them locally and returns results. Used by Claude Code for running shell commands.
+
+**How it works on Bedrock**: Supported on both InvokeModel and Converse APIs with the `computer-use-2025-01-24` beta header. Tool type: `bash_20250124`.
+
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/bash-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/bash-tool)
+
+### Text Editor Tool
+
+**What it does**: A client-side tool that lets Claude create and edit files. The model produces `tool_use` blocks with file operations (create, view, str_replace); the client executes them locally. Used by Claude Code for code editing.
+
+**How it works on Bedrock**: Supported on both InvokeModel and Converse APIs. **Important difference**: On Bedrock, the tool name must be `str_replace_based_edit_tool` (not `text_editor` as on Anthropic), and the type must be `text_editor_20250728` (not `text_editor_20250124`).
+
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/text-editor-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/text-editor-tool)
+
+
+---
+
+## Features Supported via InvokeModel API Only
+
+These features work on Bedrock but only through the InvokeModel API (not Converse API). They require specific beta headers that differ from Anthropic's naming.
+
+### Tool Search
+
+**What it does**: When you have hundreds or thousands of tools, loading all definitions into the context window is impractical (consumes tokens and degrades tool selection accuracy). Tool Search lets Claude dynamically discover and load only the 3-5 tools it needs for each request, from a catalog of up to 10,000 tools.
+
+**How it works on Bedrock**: Supported via InvokeModel API only. The Anthropic beta header `advanced-tool-use-2025-11-20` must be mapped to Bedrock's `tool-search-tool-2025-10-19`. If your application uses Converse API, you need to switch to InvokeModel API for requests that include tool search.
+
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool)
+- Reference implementation: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/converters/anthropic_to_bedrock.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/converters/anthropic_to_bedrock.py) — `_map_beta_headers()`
+
+### Tool Input Examples
+
+**What it does**: Provides example inputs in tool definitions to help Claude understand how to use complex tools correctly. Reduces tool call errors when parameters have specific formats or constraints.
+
+**How it works on Bedrock**: Supported via InvokeModel API only. Map `advanced-tool-use-2025-11-20` → `tool-examples-2025-10-29`. Same mechanism as Tool Search.
+
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/implement-tool-use#providing-tool-use-examples](https://docs.anthropic.com/en/agents-and-tools/tool-use/implement-tool-use#providing-tool-use-examples)
 
 ---
 
 ## Features Requiring Proxy Implementation
 
-### 1. Tool Search Tool
+These features are Anthropic server-side tools — Anthropic's infrastructure executes them during inference. Since Bedrock doesn't provide equivalent server-side infrastructure, they need to be implemented in a proxy layer between your application and Bedrock.
 
-Dynamically discover and load tools from a large catalog (up to 10,000) instead of loading all definitions upfront. Ideal for MCP multi-server integrations and large tool libraries.
+A complete reference implementation is available: [anthropic_api_converter](https://github.com/xiehust/anthropic_api_converter)
 
-| Dimension | Description |
-|------|------|
-| **Anthropic** | `tool_search_tool_regex_20251119` / `tool_search_tool_bm25_20251119`. Server-side tool, returns 3-5 most relevant tools. Supported: Sonnet 4.0+, Opus 4.0+ (not Haiku) |
-| **Bedrock** | Not supported via Converse API. Supported via InvokeModel API with `tool-search-tool-2025-10-19` beta header |
-| **Notes** | Requires switching to InvokeModel API when using Converse API |
+### Web Search Tool
 
-**Implementation Approach**:
+**What it does**: Claude searches the internet in real-time and cites sources in its response. Available in two versions: `web_search_20250305` (basic) and `web_search_20260209` (with dynamic filtering where Claude writes code to filter search results).
 
-- Map Anthropic beta header `advanced-tool-use-2025-11-20` to Bedrock's `tool-search-tool-2025-10-19`
-- Automatically switch from Converse API to InvokeModel API
-- Only applies to supported models (configured in `beta_header_supported_models`)
+**How to implement**: Build an agentic loop at the proxy layer:
+1. Intercept `web_search_*` tool definitions from the request — don't pass them to Bedrock
+2. When Bedrock's response includes a `server_tool_use` block calling web_search, intercept it
+3. Call a third-party search API (e.g., [Tavily](https://tavily.com), [Brave Search](https://brave.com/search/api/))
+4. Inject the search results as `web_search_tool_result` into the conversation
+5. Send the updated conversation back to Bedrock for Claude to continue
+6. Repeat until Claude stops searching
 
-**References**:
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool)
-- Bedrock: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html) (via InvokeModel)
-- Reference implementation:
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py)
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/converters/anthropic_to_bedrock.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/converters/anthropic_to_bedrock.py)
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/bedrock_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/bedrock_service.py)
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/web-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/web-search-tool)
+- Reference: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search_service.py)
 
----
+### Web Fetch Tool
 
-### 2. Tool Input Examples (input_examples)
+**What it does**: Claude fetches the full content of a specific URL (HTML pages or PDF documents). Unlike Web Search which searches by keywords, Web Fetch retrieves a known URL. No additional API cost on Anthropic.
 
-Provides example inputs for tool definitions to help Claude understand usage patterns. Useful when tool parameters are complex.
+**How to implement**: Same agentic loop pattern as Web Search. The proxy intercepts `web_fetch_*` tool calls and uses httpx (or similar) to fetch the URL content directly — no third-party API key needed. HTML is converted to plain text; PDFs are passed as base64.
 
-| Dimension | Description |
-|------|------|
-| **Anthropic** | `input_examples` field in tool definitions. Beta header: `advanced-tool-use-2025-11-20` |
-| **Bedrock** | Not supported via Converse API. Supported via InvokeModel API with `tool-examples-2025-10-29` beta header |
-| **Notes** | Same as Tool Search, requires InvokeModel API |
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/web-fetch-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/web-fetch-tool)
+- Reference: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch_service.py)
 
-**Implementation Approach**: Same as Tool Search — map `advanced-tool-use-2025-11-20` → `tool-examples-2025-10-29`, auto-switch to InvokeModel API.
+### Code Execution Tool
 
-**References**:
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/implement-tool-use#providing-tool-use-examples](https://docs.anthropic.com/en/agents-and-tools/tool-use/implement-tool-use#providing-tool-use-examples)
-- Reference implementation: Same as Tool Search (shared beta header mapping mechanism)
+**What it does**: Claude executes Bash commands and file operations in a secure, sandboxed container (5GiB RAM, 5GiB disk, no network access). Used for data analysis, chart generation, complex calculations, and file processing. Also the foundation for Web Search/Fetch dynamic filtering and Programmatic Tool Calling.
 
----
+**How to implement**: Manage Docker containers at the proxy layer. When Bedrock's response includes code execution tool calls, run them in a local Docker container and inject the results back. Requires container lifecycle management (creation, reuse, expiration after ~4.5 minutes of inactivity).
 
-### 3. Web Search Tool
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/code-execution-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/code-execution-tool)
+- Reference: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/standalone_code_execution_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/standalone_code_execution_service.py)
 
-Real-time web search with automatic source citations. Ideal for up-to-date Q&A and fact-checking.
+### Programmatic Tool Calling (PTC)
 
-| Dimension | Description |
-|------|------|
-| **Anthropic** | `web_search_20250305` (basic) / `web_search_20260209` (dynamic filtering). Server-side tool. $10/1,000 searches. Supports `max_uses`, `allowed_domains`, `blocked_domains`, `user_location` |
-| **Bedrock** | `web_search_20250305` tool type and `web-search-2025-03-05` beta header are accepted but return validation errors — no search backend. `web_search_20260209` is not recognized |
-| **Notes** | Web Search can be implemented via proxy layer |
+**What it does**: Instead of Claude making one tool call at a time (requiring a model round-trip for each), Claude writes Python code that calls multiple tools programmatically in a sandbox. This dramatically reduces latency and token consumption for multi-tool workflows. For example, checking budget compliance across 20 employees goes from 20 round-trips to 1.
 
-**Implementation Approach**: Implement an agentic loop at the proxy layer:
+**How to implement**: The proxy implements the full PTC protocol:
+1. Filter tools with `allowed_callers: ["code_execution"]` from Bedrock requests
+2. When Claude generates code that calls tools, the proxy executes it in a Docker sandbox
+3. Tool calls from within the code are paused and returned to the client for execution
+4. Client results are injected back into the sandbox to continue
+5. Final output is returned as `code_execution_tool_result`
 
-1. Proxy intercepts `web_search_*` tool definitions, does not pass them to Bedrock
-2. When Bedrock returns a web_search tool call (`server_tool_use`), the proxy intercepts it
-3. Proxy calls third-party search APIs (Tavily / Brave Search)
-4. Injects results in `web_search_tool_result` format
-5. Resends message with search results to Bedrock to continue generation
-6. Loops until the model stops calling search (agentic loop)
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/programmatic-tool-calling](https://docs.anthropic.com/en/agents-and-tools/tool-use/programmatic-tool-calling)
+- Reference: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc_service.py)
 
-Dynamic filtering (`web_search_20260209`) additionally requires a Docker sandbox.
+### Files API
 
-**References**:
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/web-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/web-search-tool)
-- Reference implementation:
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search_service.py)
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search/providers.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search/providers.py)
+**What it does**: Upload files once and reference them by `file_id` across multiple API requests, avoiding repeated large file transfers. Supports PDF, images, text, and datasets (for Code Execution). Max 500MB per file, 100GB per organization.
 
----
+**How to implement**: Build a file storage service using S3 (storage) + DynamoDB (metadata). Provide compatible `/v1/files` REST endpoints. When a Messages request references a `file_id`, read the file from S3 and inline it as the appropriate content block (`document`, `image`, or `container_upload`).
 
-### 4. Web Fetch Tool
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/files](https://docs.anthropic.com/en/build-with-claude/files)
 
-Fetch full page content from specified URLs (HTML and PDF). Unlike Web Search, this fetches known URLs.
+### Batch Processing
 
-| Dimension | Description |
-|------|------|
-| **Anthropic** | `web_fetch_20250910` (basic) / `web_fetch_20260209` (dynamic filtering). No additional cost. Supports HTML and PDF |
-| **Bedrock** | Not natively supported |
-| **Notes** | Web Fetch can be implemented via proxy layer |
+**What it does**: Process large volumes of requests asynchronously with a 50% discount. Results are available within 24 hours. Ideal for data labeling, document processing, and benchmarking.
 
-**Implementation Approach**: Similar agentic loop as Web Search. Proxy intercepts `web_fetch_*` tool calls, uses httpx to fetch URL content directly (no API Key needed), built-in HTML-to-text conversion, PDF as base64.
+**How to implement**: Bedrock has its own [Batch Inference Jobs](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html) via `CreateModelInvocationJob` API, but the interface differs from Anthropic's. You can either adapt to Bedrock's batch format directly, or build a proxy that accepts Anthropic's `/v1/messages/batches` format and converts to Bedrock batch jobs internally.
 
-**References**:
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/web-fetch-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/web-fetch-tool)
-- Reference implementation:
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch_service.py)
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch/providers.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch/providers.py)
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/batch-processing](https://docs.anthropic.com/en/build-with-claude/batch-processing)
+- Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)
 
----
+### Token Counting
 
-### 5. Code Execution Tool
+**What it does**: Estimate token usage before sending a request. Useful for cost control and context window management.
 
-Execute Bash commands and file operations in a secure sandbox. Foundation for Web Search/Fetch dynamic filtering and PTC.
+**How to implement**: Use Anthropic's tokenizer library locally. The Anthropic Python SDK includes `client.count_tokens()`. Note that image and PDF token counts follow Anthropic-specific rules (images are calculated by resolution).
 
-| Dimension | Description |
-|------|------|
-| **Anthropic** | `code_execution_20250825`. Server-side tool. Container: 5GiB RAM, 5GiB disk, 1 CPU, no network. Free when used with web_search/web_fetch 20260209 |
-| **Bedrock** | Not natively supported |
-| **Notes** | Code Execution container can be provided via proxy layer |
+- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/token-counting](https://docs.anthropic.com/en/build-with-claude/token-counting)
 
-**Implementation Approach**: Manage Docker containers at the proxy layer with an agentic loop:
+### MCP Connector
 
-1. Proxy identifies `code_execution_20250825` tool definitions
-2. Implements `bash_code_execution` and `text_editor_code_execution` sub-tools
-3. Intercepts code execution calls from Bedrock responses
-4. Executes in local Docker containers
-5. Injects results and resends to Bedrock
-6. Loops until model stops calling code execution
+**What it does**: Connect to remote MCP (Model Context Protocol) servers directly in the API request, without implementing MCP client-side. Claude can discover and use tools from MCP servers like GitHub, Slack, databases, etc.
 
-Requires container lifecycle management (creation, reuse, expiration).
+**How to implement**: Build an MCP client at the proxy layer. Parse `mcp_servers` from the request, connect to each server via MCP protocol, fetch tool lists, inject them into the request, and relay tool calls/results between Claude and the MCP servers.
 
-**References**:
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/code-execution-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/code-execution-tool)
-- Reference implementation:
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/standalone_code_execution_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/standalone_code_execution_service.py)
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc/standalone_sandbox.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc/standalone_sandbox.py)
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/mcp-connector](https://docs.anthropic.com/en/agents-and-tools/mcp-connector)
+- MCP specification: [https://modelcontextprotocol.io/specification](https://modelcontextprotocol.io/specification)
 
----
+### Memory Tool
 
-### 6. Programmatic Tool Calling (PTC)
+**What it does**: Claude can persist memories across conversations — user preferences, project context, past decisions. Enables personalized, stateful assistants.
 
-Claude writes Python code to call client tools programmatically, reducing model round-trips. Ideal for complex agent workflows.
+**How to implement**: Build a memory storage service (e.g., DynamoDB or Redis). Intercept `memory_20250801` tool calls and execute CRUD operations locally. For semantic search over memories, integrate a vector database like Amazon OpenSearch.
 
-| Dimension | Description |
-|------|------|
-| **Anthropic** | Depends on Code Execution Tool (`code_execution_20260120`). Key fields: `allowed_callers`, `caller`. Supported: Opus 4.6/4.5, Sonnet 4.6/4.5 |
-| **Bedrock** | Not natively supported |
-| **Notes** | PTC can be provided via proxy layer with Code Execution environment |
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/memory-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/memory-tool)
 
-**Implementation Approach**: Implement the complete PTC protocol at the proxy layer:
+### Computer Use Tool
 
-1. Identify tool definitions with `allowed_callers` containing `code_execution`
-2. Filter these tools from requests to Bedrock (Bedrock does not recognize `allowed_callers`)
-3. When Bedrock returns `tool_use` with `caller.type == "code_execution"`, proxy intercepts
-4. Execute Claude-generated Python code in Docker sandbox
-5. When code calls client tools, pause and return `tool_use` to client
-6. After client returns `tool_result`, inject back into sandbox
-7. Loop until code completes, inject final `code_execution_tool_result`
+**What it does**: Claude operates a computer GUI — mouse clicks, keyboard input, screenshots. Used for UI automation and RPA.
 
-**References**:
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/programmatic-tool-calling](https://docs.anthropic.com/en/agents-and-tools/tool-use/programmatic-tool-calling)
-- Reference implementation:
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc_service.py)
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc/sandbox.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc/sandbox.py)
+**How it works on Bedrock**: The `computer_20250124` tool type is **not accepted** by Bedrock (even on Opus 4.6). Note that Bash Tool and Text Editor Tool (which share the same `computer-use-2025-01-24` beta header) DO work on Bedrock — only the screen-control `computer` tool type is rejected.
 
----
+**How to implement**: Convert the `computer_20250124` tool to a custom tool with an equivalent `input_schema` (containing `action`, `coordinate`, etc. fields). The model can still generate similar tool calls, but you lose Anthropic's specialized computer-use training optimizations.
 
-### 7–14. Files API, Batch Processing, Token Counting, MCP Connector, Memory Tool, Bash/Text Editor, Computer Use, Agent Skills
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/computer-use-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/computer-use-tool)
+- Reference: [https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo)
 
-For detailed implementation guidance on these features, see the Chinese version ([ANTHROPIC_API_ON_BEDROCK_CN.md](ANTHROPIC_API_ON_BEDROCK_CN.md)) which contains complete workaround solutions and reference implementations for each.
+### Agent Skills
 
-Key highlights:
-- **Bash Tool / Text Editor Tool**: Natively supported on both InvokeModel and Converse API. Note: Bedrock requires tool name `str_replace_based_edit_tool` (not `text_editor`) and type `text_editor_20250728`.
-- **Computer Use Tool**: Not supported on Bedrock (even Opus 4.6). Can be simulated via custom tool definitions.
-- **Files API**: Can be implemented via S3 + DynamoDB at the proxy layer.
-- **Batch Processing**: Bedrock has its own [Batch Inference Jobs](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html) with a different API format.
+**What it does**: Modular capability packages containing instructions, scripts, and resource files. Extends Claude with reusable professional capabilities (data analysis workflows, domain-specific templates).
+
+**How to implement**: Requires Code Execution Tool as a foundation (see above). Parse skill definitions, inject instructions into the system prompt, preload scripts into the Code Execution container.
+
+- Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/agent-skills/overview](https://docs.anthropic.com/en/agents-and-tools/agent-skills/overview)
 
 
 ---
 
-## Beta Header Handling on Bedrock
+## Beta Header Reference
 
-The Anthropic API enables experimental features via the `anthropic-beta` header ([https://docs.anthropic.com/en/api/beta-headers](https://docs.anthropic.com/en/api/beta-headers)). On Bedrock, these require categorized handling:
+The Anthropic API uses `anthropic-beta` headers to enable experimental features. On Bedrock, these headers have different support levels. The following table is based on actual testing against Bedrock InvokeModel API.
 
-### Accepted Beta Headers (Bedrock InvokeModel)
+### Accepted by Bedrock
 
-| Beta Header | Feature | Verified |
-|------------|------|:---:|
+| Beta Header | Feature | Works |
+|------------|---------|:-----:|
 | `interleaved-thinking-2025-05-14` | Interleaved Thinking | ✅ |
 | `context-management-2025-06-27` | Context Editing | ✅ |
 | `compact-2026-01-12` | Compaction | ✅ |
-| `computer-use-2025-01-24` | Computer Use (bash + text editor work, computer does not) | ✅ |
+| `computer-use-2025-01-24` | Bash + Text Editor (computer tool itself not supported) | ✅ |
 | `computer-use-2025-11-24` | Computer Use (new version) | ✅ |
 | `context-1m-2025-08-07` | 1M Context Window | ✅ |
 | `structured-outputs-2025-11-13` | Structured Outputs | ✅ |
 | `token-efficient-tools-2025-02-19` | Token Efficient Tools | ✅ |
 | `effort-2025-11-24` | Effort Parameter | ✅ |
-| `tool-examples-2025-10-29` | Tool Input Examples | ✅ |
-| `tool-search-tool-2025-10-19` | Tool Search | ✅ |
-| `fine-grained-tool-streaming-2025-05-14` | Fine-grained Tool Streaming (GA, use `eager_input_streaming` instead) | ✅ |
-| `pdfs-2024-09-25` | PDF Support (GA) | ✅ |
-| `output-128k-2025-02-19` | 128k Output (GA) | ✅ |
-| `token-counting-2024-11-01` | Token Counting | ❌ Header accepted but not functional |
-| `mcp-client-2025-11-20` | MCP Connector | ❌ Header accepted but not functional |
-| `web-search-2025-03-05` | Web Search | ❌ Header accepted but not functional |
+| `tool-examples-2025-10-29` | Tool Input Examples (InvokeModel only) | ✅ |
+| `tool-search-tool-2025-10-19` | Tool Search (InvokeModel only) | ✅ |
+| `fine-grained-tool-streaming-2025-05-14` | Fine-grained Tool Streaming (now GA) | ✅ |
+| `pdfs-2024-09-25` | PDF Support (now GA) | ✅ |
+| `output-128k-2025-02-19` | 128k Output (now GA) | ✅ |
+| `token-counting-2024-11-01` | Token Counting | ❌ Accepted but not functional |
+| `mcp-client-2025-11-20` | MCP Connector | ❌ Accepted but not functional |
+| `web-search-2025-03-05` | Web Search | ❌ Accepted but not functional |
 
-### Headers Requiring Mapping (Different Names on Bedrock)
+### Requires Mapping
 
-| Anthropic Header | Bedrock Header | Feature | Notes |
-|-----------------|---------------|------|------|
-| `advanced-tool-use-2025-11-20` | `tool-examples-2025-10-29` | Tool Input Examples | InvokeModel API only |
-| `advanced-tool-use-2025-11-20` | `tool-search-tool-2025-10-19` | Tool Search | InvokeModel API only |
+| Anthropic Header | Bedrock Header | Feature |
+|-----------------|---------------|---------|
+| `advanced-tool-use-2025-11-20` | `tool-examples-2025-10-29` | Tool Input Examples |
+| `advanced-tool-use-2025-11-20` | `tool-search-tool-2025-10-19` | Tool Search |
 
-> **Important**: These Bedrock beta headers are only available via InvokeModel API, not Converse API. Automatic API switching is required.
+> **Note**: Anthropic uses `advanced-tool-use-2025-11-20` as an aggregate header. Bedrock rejects this header and requires the individual feature headers instead. These only work via InvokeModel API, not Converse API.
 
-### Rejected Beta Headers ("invalid beta flag")
+### Rejected by Bedrock ("invalid beta flag")
 
 | Beta Header | Feature |
-|------------|------|
-| `advanced-tool-use-2025-11-20` | Advanced Tool Use (Anthropic aggregate header; Bedrock requires split headers: `tool-examples-2025-10-29` / `tool-search-tool-2025-10-19`) |
+|------------|---------|
+| `advanced-tool-use-2025-11-20` | Advanced Tool Use (use split headers above) |
 | `prompt-caching-scope-2026-01-05` | Prompt Caching Scope |
 | `redact-thinking-2026-02-12` | Thinking Redaction |
 | `files-api-2025-04-14` | Files API |
@@ -380,30 +406,54 @@ The Anthropic API enables experimental features via the `anthropic-beta` header 
 | `fast-mode-2026-02-01` | Fast Mode |
 | `skills-2025-10-02` | Agent Skills |
 
-Reference implementation: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py)
-
 ---
 
-## Claude Code / Agent SDK Integration Notes for Bedrock
+## Claude Code on Bedrock: Integration Notes
 
-When Claude Code or Agent SDK detects a direct Bedrock connection (`CLAUDE_CODE_USE_BEDROCK=1`), it modifies its behavior:
+When Claude Code detects a direct Bedrock connection (`CLAUDE_CODE_USE_BEDROCK=1`), several issues arise. These are well-documented in the community:
 
-1. **Sends incompatible beta headers**: Claude Code sends beta headers not supported by Bedrock (e.g., `advanced-tool-use-2025-11-20`, `prompt-caching-scope-2026-01-05`), causing "invalid beta flag" errors. LiteLLM published a dedicated incident report and implemented provider-specific filtering. See:
-   - [https://github.com/anthropics/claude-code/issues/11672](https://github.com/anthropics/claude-code/issues/11672)
-   - [https://docs.litellm.ai/blog/claude-code-beta-headers-incident](https://docs.litellm.ai/blog/claude-code-beta-headers-incident)
+### 1. Incompatible Beta Headers
 
-2. **max_tokens auto-truncation**: Known issue [https://github.com/anthropics/claude-code/issues/8756](https://github.com/anthropics/claude-code/issues/8756)
+Claude Code sends beta headers that Bedrock rejects (e.g., `advanced-tool-use-2025-11-20`, `prompt-caching-scope-2026-01-05`), causing "invalid beta flag" errors. This affected many users and LiteLLM published a dedicated [incident report](https://docs.litellm.ai/blog/claude-code-beta-headers-incident) with a provider-specific filtering solution.
 
-3. **Task tool / sub-agent model ID error**: Task tool uses hardcoded Anthropic model IDs (e.g., `.anthropic.claude-sonnet-4-5-20250929-v1:0`, missing `us` prefix), causing "The provided model identifier is invalid" on Bedrock. See [https://github.com/anthropics/claude-code/issues/21235](https://github.com/anthropics/claude-code/issues/21235)
+- [https://github.com/anthropics/claude-code/issues/11672](https://github.com/anthropics/claude-code/issues/11672)
 
-4. **tool_use permission prompt delayed 10-20s**: Claude Code does not set `eager_input_streaming: true` on tool definitions. See [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
+### 2. max_tokens Auto-Truncation
 
-5. **Feature degradation**: Advanced features (PTC, Web Search, Code Execution) are not available when connecting directly to Bedrock
+Claude Code may automatically reduce `max_tokens` when it detects Bedrock, limiting output length.
 
-**Workaround**: Use a proxy that masquerades as the Anthropic API (set `CLAUDE_CODE_USE_BEDROCK=0` + custom `ANTHROPIC_BASE_URL`). The proxy layer handles:
-- Filtering unsupported beta headers
-- Mapping `advanced-tool-use-2025-11-20` → `tool-examples-2025-10-29` / `tool-search-tool-2025-10-19`
-- Mapping Anthropic model IDs to Bedrock model IDs
-- Auto-injecting `eager_input_streaming: true` on tool definitions
+- [https://github.com/anthropics/claude-code/issues/8756](https://github.com/anthropics/claude-code/issues/8756)
 
-Reference implementation: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py)
+### 3. Sub-Agent Model ID Error
+
+The Task tool (for spawning sub-agents) uses hardcoded Anthropic model IDs like `.anthropic.claude-sonnet-4-5-20250929-v1:0` — missing the required `us` prefix for Bedrock. This breaks all custom agents and sub-agents on Bedrock.
+
+- [https://github.com/anthropics/claude-code/issues/21235](https://github.com/anthropics/claude-code/issues/21235)
+
+### 4. Slow Tool Permission Prompts (10-20s delay)
+
+Claude Code doesn't set `eager_input_streaming: true` on tool definitions, so Bedrock buffers the entire tool_use JSON block before streaming it. Permission prompts that appear in 1-3s on Anthropic API take 10-20s on Bedrock.
+
+- [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
+
+### 5. Missing Advanced Features
+
+PTC, Web Search, Code Execution, and other server-side tools are not available when connecting directly to Bedrock.
+
+### Recommended Solution
+
+Use a proxy that masquerades as the Anthropic API:
+
+```bash
+export CLAUDE_CODE_USE_BEDROCK=0
+export ANTHROPIC_BASE_URL=http://your-proxy-endpoint
+export ANTHROPIC_API_KEY=sk-your-proxy-key
+```
+
+The proxy handles:
+- Filtering/mapping incompatible beta headers
+- Converting Anthropic model IDs to Bedrock model IDs
+- Auto-injecting `eager_input_streaming: true` on all tool definitions
+- Implementing server-side tools (Web Search, Code Execution, PTC) via agentic loops
+
+Reference implementation: [https://github.com/xiehust/anthropic_api_converter](https://github.com/xiehust/anthropic_api_converter)

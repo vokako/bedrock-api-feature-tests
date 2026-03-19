@@ -1,8 +1,10 @@
 <div align="center">
 
-# Anthropic API Features on AWS Bedrock
+# Anthropic API on AWS Bedrock
 
 **Anthropic API 各特性在 AWS Bedrock 上的支持情况**
+
+[English Version](ANTHROPIC_API_ON_BEDROCK_EN.md)
 
 </div>
 
