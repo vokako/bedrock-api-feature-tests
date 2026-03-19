@@ -318,7 +318,7 @@ Claude writes Python code to call client tools programmatically, reducing model 
 
 ### 7–14. Files API, Batch Processing, Token Counting, MCP Connector, Memory Tool, Bash/Text Editor, Computer Use, Agent Skills
 
-For detailed implementation guidance on these features, see the Chinese version ([ANTHROPIC_VS_BEDROCK_CN.md](ANTHROPIC_VS_BEDROCK_CN.md)) which contains complete workaround solutions and reference implementations for each.
+For detailed implementation guidance on these features, see the Chinese version ([ANTHROPIC_API_ON_BEDROCK_CN.md](ANTHROPIC_API_ON_BEDROCK_CN.md)) which contains complete workaround solutions and reference implementations for each.
 
 Key highlights:
 - **Bash Tool / Text Editor Tool**: Natively supported on both InvokeModel and Converse API. Note: Bedrock requires tool name `str_replace_based_edit_tool` (not `text_editor`) and type `text_editor_20250728`.

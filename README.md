@@ -2,6 +2,10 @@
 
 Verify Anthropic API features on AWS Bedrock using InvokeModel / InvokeModelWithResponseStream API.
 
+📄 **Anthropic API on Bedrock Feature Guide**:
+- [中文版](ANTHROPIC_API_ON_BEDROCK_CN.md)
+- [English](ANTHROPIC_API_ON_BEDROCK_EN.md)
+
 ## Prerequisites
 
 - Python 3.12+
@@ -57,5 +61,5 @@ Edit `helpers.py` to change:
 
 ## Documentation
 
-- [ANTHROPIC_VS_BEDROCK_CN.md](ANTHROPIC_VS_BEDROCK_CN.md) — 中文版：Anthropic API 各特性在 Bedrock 上的支持情况
-- [ANTHROPIC_VS_BEDROCK_EN.md](ANTHROPIC_VS_BEDROCK_EN.md) — English: Anthropic API Feature Compatibility on AWS Bedrock
+- [ANTHROPIC_API_ON_BEDROCK_CN.md](ANTHROPIC_API_ON_BEDROCK_CN.md) — 中文版：Anthropic API 各特性在 Bedrock 上的支持情况
+- [ANTHROPIC_API_ON_BEDROCK_EN.md](ANTHROPIC_API_ON_BEDROCK_EN.md) — English: Anthropic API Feature Compatibility on AWS Bedrock
