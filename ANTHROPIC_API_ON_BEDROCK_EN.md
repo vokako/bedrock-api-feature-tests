@@ -140,6 +140,8 @@ Bedrock provides two APIs for calling Claude models:
 
 **How it works on Bedrock**: Under InvokeModel API, the `cache_control` format is identical to Anthropic. Under Converse API, caching uses the `cachePoint` mechanism instead. TTL supports 5 minutes (default) and 1 hour.
 
+> ⚠️ **Automatic Caching not supported on Bedrock**: Anthropic's new top-level `cache_control` feature (setting `"cache_control": {"type": "ephemeral"}` at the request body level, where the system automatically applies the cache breakpoint to the last cacheable block) is not available on Bedrock. All models return `cache_control: Extra inputs are not permitted`. Anthropic's docs explicitly state Bedrock support is "coming later". Currently Bedrock only supports **explicit cache breakpoints** (placing `cache_control` on individual content blocks).
+
 - Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)
 
 ### Vision (Multimodal)

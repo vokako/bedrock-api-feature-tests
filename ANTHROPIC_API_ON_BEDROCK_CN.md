@@ -118,6 +118,8 @@ Claude 动态决定是否思考及思考深度，无需手动设置 `budget_toke
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)
 - **Bedrock**: InvokeModel API 下 `cache_control` 格式与 Anthropic 一致；Converse API 通过 `cachePoint` 机制支持，需做转换。TTL 支持 5m 和 1h。
 
+> ⚠️ **Bedrock 不支持 Automatic Caching**：Anthropic 新增的顶层 `cache_control` 自动缓存功能（在请求体顶层设置 `"cache_control": {"type": "ephemeral"}`，系统自动将缓存断点应用到最后一个可缓存的 block）在 Bedrock 上不可用，所有模型均返回 `cache_control: Extra inputs are not permitted`。Anthropic 文档明确标注 Bedrock 支持"coming later"。目前 Bedrock 仅支持 **explicit cache breakpoints**（在单个 content block 上设置 `cache_control`）。
+
 ### Vision（多模态）
 
 让 Claude 理解和分析图像内容。适用于图表解读、OCR、UI 截图分析、图像描述等场景。
