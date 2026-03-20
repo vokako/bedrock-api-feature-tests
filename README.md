@@ -52,6 +52,8 @@ uv run python test_01_messages_basic.py
 | 16 | `test_16_adaptive_thinking.py` | Adaptive Thinking | — (`thinking.type: "adaptive"` + `effort`) |
 | 17 | `test_17_bash_tool.py` | Bash Tool | `computer-use-2025-01-24` |
 | 18 | `test_18_text_editor_tool.py` | Text Editor Tool | `computer-use-2025-01-24` |
+| 19 | `test_19_claude46_changes.py` | Claude 4.6 Changes (prefill, output_config, deprecations) | — |
+| 20 | `test_20_count_tokens.py` | CountTokens API (in-region only) | — |
 
 ## Configuration
 
