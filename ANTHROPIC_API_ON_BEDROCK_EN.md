@@ -173,14 +173,16 @@ Bedrock provides two APIs for calling Claude models:
 
 **How it works on Bedrock**: Use `tool_choice: {type: "tool", name: "..."}` to force a specific tool call, where the tool's `input_schema` defines the desired output structure. Alternatively, use `output_config.format` for direct JSON output (see below).
 
-> ⚠️ **Breaking Change (Claude 4.6)**: The `output_format` parameter is **no longer accepted** on Bedrock — it returns a 400 error directing you to use `output_config.format` instead. This is stricter than Anthropic's API where `output_format` is deprecated but still functional. You must migrate:
+> ⚠️ **Breaking Change (Bedrock)**: The `output_format` parameter is **rejected on all models on Bedrock** — including Sonnet 4.5, Haiku 4.5, and older models — returning a 400 error directing you to use `output_config.format`. This is a Bedrock platform-level change, not model-specific. You must migrate:
 > ```json
-> // ❌ Old syntax (returns 400 on Bedrock)
+> // ❌ Old syntax (returns 400 on ALL models on Bedrock)
 > "output_format": {"type": "json_schema", ...}
 > // ✅ New syntax
 > "output_config": {"format": {"type": "json_schema", "schema": {..., "additionalProperties": false}}}
 > ```
 > Note: All `object` types in the schema must explicitly set `"additionalProperties": false`.
+>
+> Additionally, `strict: true` on tool definitions is supported, guaranteeing tool parameters strictly conform to the schema. Verified on Sonnet 4.5, Haiku 4.5, Sonnet 4.6, and Opus 4.6.
 
 - Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/structured-outputs](https://docs.anthropic.com/en/build-with-claude/structured-outputs)
 - Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html)
