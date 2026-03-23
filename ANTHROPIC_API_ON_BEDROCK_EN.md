@@ -142,6 +142,32 @@ Bedrock provides two APIs for calling Claude models:
 
 > ⚠️ **Automatic Caching not supported on Bedrock**: Anthropic's new top-level `cache_control` feature (setting `"cache_control": {"type": "ephemeral"}` at the request body level, where the system automatically applies the cache breakpoint to the last cacheable block) is not available on Bedrock. All models return `cache_control: Extra inputs are not permitted`. Anthropic's docs explicitly state Bedrock support is "coming later". Currently Bedrock only supports **explicit cache breakpoints** (placing `cache_control` on individual content blocks).
 
+**Workaround for Automatic Caching**: When the proxy receives a request with top-level `cache_control`, convert it to explicit breakpoints:
+
+1. Remove the top-level `cache_control` from the request body
+2. Find the last cacheable content block in the request (last block in `system`, last message in `messages`, or last tool in `tools`)
+3. Add `cache_control: {"type": "ephemeral"}` to that block (InvokeModel API) or append a `cachePoint: {"type": "default"}` after it (Converse API)
+4. This achieves the same effect as Anthropic's automatic mode — the longest prefix up to that point gets cached
+
+For Converse API specifically, Bedrock also supports **Simplified Cache Management**: placing a single `cachePoint` at the end of your static content, and the system automatically looks back up to ~20 content blocks to find the longest matching cache prefix. This means you don't need to predict the optimal checkpoint location — just put one `cachePoint` at the end.
+
+```
+// Converse API — single cachePoint at end of static content
+"messages": [
+    {"role": "user", "content": [
+        {"text": "long static content..."},
+        {"cachePoint": {"type": "default"}}   // ← system auto-finds best cache match
+    ]}
+]
+
+// InvokeModel API — cache_control on the last static block
+"messages": [
+    {"role": "user", "content": [
+        {"type": "text", "text": "long static content...", "cache_control": {"type": "ephemeral"}}
+    ]}
+]
+```
+
 - Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)
 
 ### Vision (Multimodal)

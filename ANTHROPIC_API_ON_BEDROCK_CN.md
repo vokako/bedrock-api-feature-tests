@@ -120,6 +120,32 @@ Claude 动态决定是否思考及思考深度，无需手动设置 `budget_toke
 
 > ⚠️ **Bedrock 不支持 Automatic Caching**：Anthropic 新增的顶层 `cache_control` 自动缓存功能（在请求体顶层设置 `"cache_control": {"type": "ephemeral"}`，系统自动将缓存断点应用到最后一个可缓存的 block）在 Bedrock 上不可用，所有模型均返回 `cache_control: Extra inputs are not permitted`。Anthropic 文档明确标注 Bedrock 支持"coming later"。目前 Bedrock 仅支持 **explicit cache breakpoints**（在单个 content block 上设置 `cache_control`）。
 
+**Automatic Caching 的 Workaround**：当代理层收到带有顶层 `cache_control` 的请求时，转换为显式断点：
+
+1. 移除请求体顶层的 `cache_control`
+2. 找到请求中最后一个可缓存的 content block（`system` 的最后一个 block、`messages` 的最后一条消息、或 `tools` 的最后一个工具）
+3. 在该 block 上添加 `cache_control: {"type": "ephemeral"}`（InvokeModel API）或在其后追加 `cachePoint: {"type": "default"}`（Converse API）
+4. 效果等同于 Anthropic 的自动模式 — 该点之前的最长前缀会被缓存
+
+对于 Converse API，Bedrock 还支持 **Simplified Cache Management**：只需在静态内容末尾放一个 `cachePoint`，系统会自动往回查找最多约 20 个 content block 来匹配最长的缓存前缀。无需精确放置多个 checkpoint。
+
+```
+// Converse API — 在静态内容末尾放一个 cachePoint
+"messages": [
+    {"role": "user", "content": [
+        {"text": "长静态内容..."},
+        {"cachePoint": {"type": "default"}}   // ← 系统自动查找最佳缓存匹配
+    ]}
+]
+
+// InvokeModel API — 在最后一个静态 block 上设置 cache_control
+"messages": [
+    {"role": "user", "content": [
+        {"type": "text", "text": "长静态内容...", "cache_control": {"type": "ephemeral"}}
+    ]}
+]
+```
+
 ### Vision（多模态）
 
 让 Claude 理解和分析图像内容。适用于图表解读、OCR、UI 截图分析、图像描述等场景。
