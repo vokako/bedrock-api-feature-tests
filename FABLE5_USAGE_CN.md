@@ -78,39 +78,80 @@ print(bedrock.get_account_data_retention())   # {'mode': 'provider_data_share', 
 
 ### 方式 B：project 级开启（影响范围最小，推荐隔离场景）
 
-只想让某个 project 里的 Fable 5 流量被共享、其他流量（含 Opus 4.7/4.8）保持不共享时，用 project 级。**仅 mantle 端点支持**（runtime/InvokeModel 没有 project 概念）。
+只想让某个 project 里的 Fable 5 流量被共享、其他流量（含 Opus 4.7/4.8）保持**零留存**时，用 project 级隔离。**仅 mantle 端点支持**（runtime/InvokeModel 没有 project 概念）。
 
-> 说明：account 与 project 是两套**独立**配置，且各自又分 control-plane / mantle 两份。effective mode 解析顺序：`project → account → model default`（取第一个非 `inherit` 的值）。
+> 原理：account 与 project 是两套**独立**配置（且各自又分 control-plane / mantle 两份）。effective mode 解析顺序为 `project → account → model default`（取第一个非 `inherit` 的值）。把 account 设成 `none`、只在某个 project 设 `provider_data_share`，就能做到"默认零留存，仅该 project 共享"。
 
-**1) 列出 / 创建 project**
+下面是完整三步（命令用 `x-api-key` 或 SigV4 均可），每步附 2026-06-10 实测输出。
+
+**第 1 步：确认 / 设置 account（mantle）数据保留为 `none`**
+
+`none` = 默认任何模型都零留存，作为隔离的安全基线。
 
 ```bash
-# 列出（账号自带一个 default project，且 default 不可修改）
-curl https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
+# 查当前
+curl https://bedrock-mantle.us-east-1.api.aws/v1/data_retention \
   -H "x-api-key: $BEDROCK_API_KEY"
 
-# 创建一个新 project
+# 设为 none
+curl -X PUT https://bedrock-mantle.us-east-1.api.aws/v1/data_retention \
+  -H "x-api-key: $BEDROCK_API_KEY" -H "Content-Type: application/json" \
+  -d '{ "mode": "none" }'
+```
+实测：`{"mode": "none", "updated_at": ...}`
+
+**第 2 步：创建 project 并开启 project 级 `provider_data_share`**
+
+```bash
+# 创建（default project 不可修改，必须新建）
 curl -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
   -H "x-api-key: $BEDROCK_API_KEY" -H "Content-Type: application/json" \
   -d '{ "name": "fable5-isolated" }'
 # 返回 id 形如 proj_xxxxxxxxxxxx
-```
 
-**2) 给该 project 设 `provider_data_share`**
-
-```bash
+# 给该 project 设 provider_data_share
 curl -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/proj_xxxxxxxxxxxx \
   -H "x-api-key: $BEDROCK_API_KEY" -H "Content-Type: application/json" \
   -d '{ "data_retention": { "mode": "provider_data_share" } }'
 ```
+实测：`project data_retention = {"mode": "provider_data_share"}`
 
-**3) 调用时把请求绑定到该 project**（见下文「方式二：Messages API」的 `anthropic-workspace-id` header）。只有带了 project header 的请求才用该 project 的保留模式；其他请求落到 default project（保持 inherit），不受影响。
+**第 3 步：测试 Fable 5 —— 加 header vs 不加 header**
+
+请求绑定 project 用 `anthropic-workspace-id` header（Messages API 格式）。
+
+```bash
+# 不加 header：落到 account=none，Fable 5 被拒
+curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
+  -H "x-api-key: $BEDROCK_API_KEY" -H "anthropic-version: 2023-06-01" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"anthropic.claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"Say hi"}]}'
+
+# 加 header：落到 project=provider_data_share，Fable 5 可用
+curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
+  -H "x-api-key: $BEDROCK_API_KEY" -H "anthropic-version: 2023-06-01" \
+  -H "anthropic-workspace-id: proj_xxxxxxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"anthropic.claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"Say hi"}]}'
+```
+
+实测结果：
+
+| 请求 | 生效 scope | 结果 |
+|------|-----------|------|
+| **不加** `anthropic-workspace-id` | account = `none` | ❌ 400 `data retention mode 'none' is not available for this model` |
+| **加** `anthropic-workspace-id=proj_xxx` | project = `provider_data_share` | ✅ `Hello there, friend!` |
+
+这就证明了隔离生效：**account 零留存，只有显式绑定到该 project 的请求才会被记录共享**。其他模型（Opus 4.7/4.8 等）在不带 header 时走 account=`none`，不被留存。
+
+> project header 因 API 格式而异：Messages 格式（`/anthropic/v1/messages`）用 `anthropic-workspace-id`；OpenAI 兼容格式（`/v1/...`）用 `openai-project`。
 
 ### 怎么改回去
 
 把对应 scope（account 或 project）再设成 `inherit` / `default` / `none` 即可。但**已经发送的流量无法撤回**。
 
 ## 四、如何调用
+
 
 Fable 5 有两条调用路径，**数据保留的配置 scope 不同**：
 
