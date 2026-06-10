@@ -54,6 +54,7 @@ uv run python test_01_messages_basic.py
 | 18 | `test_18_text_editor_tool.py` | Text Editor Tool | `computer-use-2025-01-24` |
 | 19 | `test_19_claude46_changes.py` | Claude 4.6 Changes (prefill, output_config, deprecations) | — |
 | 20 | `test_20_count_tokens.py` | CountTokens API (in-region only) | — |
+| 21 | `test_21_claude47_changes.py` | Claude 4.7 Changes (breaking changes, thinking display, task budgets) | `task-budgets-2026-03-13` |
 
 ## Configuration
 

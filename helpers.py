@@ -5,6 +5,7 @@ import time
 
 REGION = "us-east-1"
 MODEL_ID = "global.anthropic.claude-sonnet-4-6"
+OPUS_47 = "global.anthropic.claude-opus-4-7"
 ANTHROPIC_VERSION = "bedrock-2023-05-31"
 
 

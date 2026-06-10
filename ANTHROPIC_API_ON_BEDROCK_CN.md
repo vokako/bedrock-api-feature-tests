@@ -14,7 +14,7 @@
 
 ---
 
-> 📌 本文档基于 Bedrock InvokeModel API 实测验证（Sonnet 4.6），所有标注 ✅ 的特性均有对应测试脚本。
+> 📌 本文档基于 Bedrock InvokeModel API 实测验证（Sonnet 4.6 / Opus 4.7），所有标注 ✅ 的特性均有对应测试脚本。
 
 ## 总览
 
@@ -49,6 +49,7 @@
 | Text Editor Tool | ✅ | ✅ | ✅ | name 映射 | [test_18](test_18_text_editor_tool.py) |
 | Computer Use Tool | ✅ | ❌ | ❌ | 需自行实现 |
 | Agent Skills | ✅ | ❌ | ❌ | 需自行实现 |
+| Claude 4.7 Changes | — | — | ✅ | 验证 Opus 4.7 breaking changes | [test_21](test_21_claude47_changes.py) |
 
 ---
 
@@ -65,6 +66,17 @@ Claude 的核心对话接口，支持多轮对话、system prompt、assistant pr
 - InvokeModel API 与 Anthropic API 格式基本等价，直接透传即可。Converse API 提供统一接口但格式不同，需做转换。
 
 > ⚠️ **Breaking Change (Claude 4.6)**：Opus 4.6 和 Sonnet 4.6 **不再支持 assistant message prefill**（即对话最后一条消息为 assistant 角色的预填充）。发送 prefill 请求会返回 400 错误：`"This model does not support assistant message prefill"`。Anthropic 官方文档仅标注 Opus 4.6 不支持 prefill，但 Bedrock 实测 Sonnet 4.6 同样不支持。替代方案：使用 [Structured Outputs](#structured-outputs) 或 system prompt 来控制输出格式。
+
+> ⚠️ **Breaking Changes (Claude Opus 4.7)**：Opus 4.7 在 4.6 基础上新增以下 breaking changes（已通过 [test_21](test_21_claude47_changes.py) 验证）：
+> - **Extended thinking 移除**：`thinking: {type: "enabled", budget_tokens: N}` 返回 400 错误。必须迁移到 `thinking: {type: "adaptive"}` + `output_config.effort`。
+> - **Sampling 参数移除**：`temperature`、`top_p`、`top_k` 设置非默认值返回 400 错误。必须从请求中移除这些参数。
+> - **Prefill 移除**：同 4.6，assistant message prefill 返回 400 错误。
+> - **Thinking 内容默认隐藏**：thinking block 仍出现在响应中，但 `thinking` 字段默认为空。需设置 `thinking.display: "summarized"` 才能获取 thinking 内容。
+> - **新 tokenizer**：同样文本可能产生约 1x-1.35x 的 token 数量（最多增加 ~35%）。
+> - **新增 `xhigh` effort 级别**：推荐用于编码和 agentic 场景。
+> - **128k max_tokens GA**：无需 beta header 即可设置 `max_tokens=128000`。
+> - **Task budgets (beta)**：通过 `task-budgets-2026-03-13` beta header 启用，在 `output_config` 中设置 `task_budget`，让模型感知 token 预算并自行调配。
+> - **高分辨率图像支持**：最大分辨率从 1568px 提升到 2576px（长边），图像 token 最多增加约 3x。
 
 ### Streaming (SSE)
 
@@ -92,6 +104,8 @@ Claude 的核心对话接口，支持多轮对话、system prompt、assistant pr
 
 > ⚠️ **Deprecated (Claude 4.6)**：`thinking: {type: "enabled", budget_tokens: N}` 在 Opus 4.6 和 Sonnet 4.6 上已被标记为 deprecated。Bedrock 实测仍可正常使用，但未来版本将移除。建议迁移到 [Adaptive Thinking](#adaptive-thinking) (`thinking: {type: "adaptive"}`) + [effort 参数](#adaptive-thinking)。
 
+> 🚫 **Removed (Claude Opus 4.7)**：`thinking: {type: "enabled", budget_tokens: N}` 在 Opus 4.7 上返回 400 错误。**必须**迁移到 [Adaptive Thinking](#adaptive-thinking)。
+
 ### Adaptive Thinking
 
 Claude 动态决定是否思考及思考深度，无需手动设置 `budget_tokens`。适用于任务复杂度不均匀的场景（如 agentic workflow 中简单和复杂步骤交替出现）。
@@ -100,6 +114,7 @@ Claude 动态决定是否思考及思考深度，无需手动设置 `budget_toke
 - **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html)
 - `thinking: {type: "adaptive"}` — 无需 beta header。仅 Opus 4.6 / Sonnet 4.6 支持。自动启用 interleaved thinking。可配合 `output_config.effort`（`max`/`high`/`medium`/`low`）控制思考程度。
 - Opus 4.6 新增 `max` effort 级别，提供最高能力。Sonnet 4.6 首次引入 effort 参数到 Sonnet 系列，建议大多数场景使用 `medium` 以平衡速度、成本和性能。
+- **Opus 4.7 新增**：`xhigh` effort 级别（推荐用于编码和 agentic 场景）。Opus 4.7 上 adaptive thinking **默认关闭**（不设置 `thinking` 字段时不产生 thinking），需显式设置 `thinking: {type: "adaptive"}` 启用。Thinking 内容默认隐藏（`display: "omitted"`），需设置 `display: "summarized"` 才能在响应中看到 thinking 文本。
 
 ### Interleaved Thinking
 
@@ -196,6 +211,8 @@ Claude 在回答中引用来源文档的具体位置。适用于需要溯源验�
 
 > ⚠️ **模型兼容性注意**：`eager_input_streaming` 字段仅 Claude 4.6 系列（Opus 4.6 / Sonnet 4.6）支持。在 Sonnet 4.5 及更早模型上，该字段会导致 400 错误（`Extra inputs are not permitted`），即使同时传递 `fine-grained-tool-streaming-2025-05-14` beta header 也无法解决。但实测 Sonnet 4.5 本身已默认以细粒度方式流式返回 tool input JSON delta（20+ chunks），无需额外参数。因此代理层应根据模型版本判断是否注入此字段。
 
+> ⚠️ **Opus 4.7 不可用**：Bedrock 上 Opus 4.7 同样不支持 `eager_input_streaming` 字段（返回 `Extra inputs are not permitted`），无论有无 beta header。这是 Bedrock 侧尚未适配的问题。
+
 ### Compaction
 
 自动压缩对话历史以适应上下文窗口。适用于长对话或 Agent 循环中上下文逐渐膨胀的场景，避免超出 context window 限制。
@@ -211,6 +228,8 @@ Claude 在回答中引用来源文档的具体位置。适用于需要溯源验�
 - **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/context-editing](https://docs.anthropic.com/en/build-with-claude/context-editing)
 - **Bedrock**: Beta header `context-management-2025-06-27` 直接透传。
 
+> ⚠️ **Opus 4.7 不可用**：Bedrock 上 Opus 4.7 不支持 message ID 字段（`messages.0.id: Extra inputs are not permitted`）。Context Editing 功能在 Opus 4.7 上暂不可用，Bedrock 侧尚未适配。
+
 ---
 
 ## 需要适配的特性
@@ -225,6 +244,8 @@ Claude 在回答中引用来源文档的具体位置。适用于需要溯源验�
 | **Anthropic** | `tool_search_tool_regex_20251119` / `tool_search_tool_bm25_20251119`。Server-side tool，Claude 动态发现和加载工具（最多 10,000 个），每次返回 3-5 个最相关工具。支持模型：Sonnet 4.0+, Opus 4.0+（不支持 Haiku） |
 | **Bedrock** | **Converse API 不支持**。仅 InvokeModel API 支持，需传递 `tool-search-tool-2025-10-19` beta header |
 | **实现差异** | 使用 Converse API 时需切换到 InvokeModel API |
+
+> ⚠️ **Opus 4.7 不可用**：Bedrock 上 Opus 4.7 的 `tool_search_tool_regex_20251119` 工具类型返回 `not supported for this model`。Bedrock 侧尚未适配。Opus 4.6 / Sonnet 4.6 正常。
 
 **Implementation Solution**：
 
@@ -471,6 +492,8 @@ Claude 在回答中引用来源文档的具体位置。适用于需要溯源验�
 
 > ⚠️ **重要限制**：CountTokens API **仅支持 in-region model ID**（如 `anthropic.claude-sonnet-4-6`）。使用 cross-region（`us.anthropic.claude-sonnet-4-6`）或 global（`global.anthropic.claude-sonnet-4-6`）前缀会返回 `The provided model doesn't support counting tokens` 错误。代理层需在调用 CountTokens 时剥离 `us.`/`eu.`/`global.` 前缀。
 
+> ⚠️ **Opus 4.7 不支持 CountTokens**：`anthropic.claude-opus-4-7` 和 `global.anthropic.claude-opus-4-7` 均返回 "doesn't support counting tokens"。Opus 4.7 目前仅有 global 部署，没有 in-region model ID，因此 CountTokens API 不可用。需使用本地 tokenizer 估算。
+
 **Implementation Solution**：
 
 在代理层实现 `POST /v1/messages/count_tokens` 端点：
@@ -557,6 +580,8 @@ Claude 在回答中引用来源文档的具体位置。适用于需要溯源验�
 |------|------|
 | **Anthropic** | `bash_20250124`、`text_editor_20250124` / `text_editor_20250728`。Beta header: `computer-use-2025-01-24`。客户端工具——模型生成 `tool_use`，客户端负责执行 |
 | **Bedrock** | **InvokeModel 和 Converse API 均支持**。需传递 `computer-use-2025-01-24` beta header（InvokeModel 通过 `anthropic_beta` 字段，Converse 通过 `additionalModelRequestFields`） |
+
+> ⚠️ **Opus 4.7 不可用**：Bedrock 上 Opus 4.7 的 `bash_20250124` 和 `text_editor_20250728` 工具类型均返回 `tool type 'xxx' is not supported for this model`，无论使用 `computer-use-2025-01-24` 还是 `computer-use-2025-11-24` header。Opus 4.6 正常。
 | **实现差异** | Bedrock 上 text editor 的 tool name 必须为 `str_replace_based_edit_tool`（Anthropic 上为 `text_editor`），type 为 `text_editor_20250728`（Anthropic 上还支持 `text_editor_20250124`） |
 
 **Implementation Solution**：
@@ -649,6 +674,16 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://do
 | `tool-examples-2025-10-29` | Tool Input Examples | ✅ 已验证 |
 | `tool-search-tool-2025-10-19` | Tool Search | ✅ 已验证 |
 | `fine-grained-tool-streaming-2025-05-14` | Fine-grained Tool Streaming（已 GA，可用 `eager_input_streaming` 替代） | ✅ 已验证 |
+| `task-budgets-2026-03-13` | Task Budgets（Opus 4.7 新增） | ✅ 已验证 |
+
+> ⚠️ **Opus 4.7 功能缺失注意**：以上 beta header 在 Opus 4.7 上均被 Bedrock 接受（不报 invalid），但带真实参数的功能验证发现以下功能在 Opus 4.7 上**不可用**（Bedrock 侧尚未适配）：
+> - `computer-use-2025-01-24` / `computer-use-2025-11-24`：bash/text_editor 工具类型报 `not supported for this model`
+> - `context-management-2025-06-27`：message ID 字段报 `Extra inputs are not permitted`
+> - `tool-search-tool-2025-10-19`：tool_search 工具类型报 `not supported for this model`
+> - `fine-grained-tool-streaming-2025-05-14`：`eager_input_streaming` 字段报 `Extra inputs are not permitted`
+> - `token-efficient-tools-2025-02-19`：有无 header input_tokens 完全一致，Claude 4+ 已内置，header 无实际效果
+>
+> 以上功能在 Opus 4.6 / Sonnet 4.6 上正常。`tool-examples-2025-10-29` 和 `effort`（已 GA）在 Opus 4.7 上功能正常。
 | `pdfs-2024-09-25` | PDF Support（已 GA） | ✅ |
 | `output-128k-2025-02-19` | 128k Output（已 GA） | ✅ |
 | `token-counting-2024-11-01` | Token Counting | ❌ header 被接受但功能不可用（Bedrock 有原生 CountTokens API，无需此 header） |

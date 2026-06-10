@@ -16,7 +16,7 @@ This document provides a comprehensive mapping of every Anthropic Messages API f
 - ⚠️ **Supported with differences** — works on Bedrock but requires specific API or header configuration
 - 🔧 **Proxy implementation required** — not built into Bedrock, but can be implemented via a proxy/application layer
 
-All ✅ features have been **verified with test scripts** against Bedrock InvokeModel API using `global.anthropic.claude-sonnet-4-6`.
+All ✅ features have been **verified with test scripts** against Bedrock InvokeModel API using `global.anthropic.claude-sonnet-4-6` and `global.anthropic.claude-opus-4-7`.
 
 ---
 
@@ -68,6 +68,7 @@ Bedrock provides two APIs for calling Claude models:
 | Memory Tool | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
 | Computer Use Tool | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
 | Agent Skills | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
+| Claude 4.7 Changes | — | — | ✅ | Opus 4.7 breaking changes verified | [test_21](test_21_claude47_changes.py) |
 
 **Summary**: 18 out of 29 features are natively supported on Bedrock. The remaining 11 can be implemented via a proxy layer — a reference implementation is available at [anthropic_api_converter](https://github.com/xiehust/anthropic_api_converter).
 
@@ -82,6 +83,17 @@ Bedrock provides two APIs for calling Claude models:
 **How it works on Bedrock**: The InvokeModel API accepts the exact same JSON format as the Anthropic API. You only need to add `"anthropic_version": "bedrock-2023-05-31"` and use AWS authentication instead of an API key. The Converse API provides a unified interface across all Bedrock models but uses a different JSON format.
 
 > ⚠️ **Breaking Change (Claude 4.6)**: Opus 4.6 and Sonnet 4.6 **no longer support assistant message prefill** (conversations ending with an assistant-role message). Prefill requests return a 400 error: `"This model does not support assistant message prefill"`. Note: Anthropic's documentation only mentions Opus 4.6, but on Bedrock, Sonnet 4.6 also rejects prefill. Alternatives: use [Structured Outputs](#structured-outputs) or system prompt instructions to control output format.
+
+> ⚠️ **Breaking Changes (Claude Opus 4.7)**: Opus 4.7 introduces additional breaking changes on top of 4.6 (verified via [test_21](test_21_claude47_changes.py)):
+> - **Extended thinking removed**: `thinking: {type: "enabled", budget_tokens: N}` returns 400 error. Must migrate to `thinking: {type: "adaptive"}` + `output_config.effort`.
+> - **Sampling parameters removed**: `temperature`, `top_p`, `top_k` with non-default values return 400 error. Remove these parameters from requests entirely.
+> - **Prefill removed**: Same as 4.6 — assistant message prefill returns 400 error.
+> - **Thinking content omitted by default**: Thinking blocks still appear in responses, but the `thinking` field is empty unless you set `thinking.display: "summarized"`.
+> - **New tokenizer**: Same text may produce ~1x-1.35x more tokens (up to ~35% increase).
+> - **New `xhigh` effort level**: Recommended for coding and agentic use cases.
+> - **128k max_tokens GA**: `max_tokens=128000` accepted without any beta header.
+> - **Task budgets (beta)**: Enable via `task-budgets-2026-03-13` beta header. Set `task_budget` in `output_config` to let the model self-pace within a token budget.
+> - **High-resolution image support**: Max resolution increased from 1568px to 2576px (long edge), image tokens up to ~3x more.
 
 - Anthropic docs: [https://docs.anthropic.com/en/api/messages](https://docs.anthropic.com/en/api/messages)
 - Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html)
@@ -112,6 +124,8 @@ Bedrock provides two APIs for calling Claude models:
 
 > ⚠️ **Deprecated (Claude 4.6)**: `thinking: {type: "enabled", budget_tokens: N}` is deprecated on Opus 4.6 and Sonnet 4.6. Verified still functional on Bedrock, but will be removed in a future model release. Migrate to [Adaptive Thinking](#adaptive-thinking) (`thinking: {type: "adaptive"}`) with the [effort parameter](#adaptive-thinking).
 
+> 🚫 **Removed (Claude Opus 4.7)**: `thinking: {type: "enabled", budget_tokens: N}` returns 400 error on Opus 4.7. You **must** migrate to [Adaptive Thinking](#adaptive-thinking).
+
 - Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/extended-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking)
 - Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html)
 
@@ -120,6 +134,8 @@ Bedrock provides two APIs for calling Claude models:
 **What it does**: Claude dynamically decides whether to think and how deeply, based on task complexity. Unlike Extended Thinking where you set a fixed `budget_tokens`, Adaptive Thinking lets the model allocate thinking resources automatically. You can guide it with the `effort` parameter (`max`/`high`/`medium`/`low`).
 
 **How it works on Bedrock**: Set `thinking: {type: "adaptive"}` in the request body. No beta header required. Only available on Opus 4.6 and Sonnet 4.6. Automatically enables interleaved thinking (thinking between tool calls). Opus 4.6 introduces a new `max` effort level for the highest capability. Sonnet 4.6 is the first Sonnet model to support the effort parameter — consider using `medium` for most Sonnet 4.6 use cases to balance speed, cost, and performance.
+
+**Opus 4.7 updates**: New `xhigh` effort level (recommended for coding and agentic use cases). Adaptive thinking is **off by default** on Opus 4.7 — requests without a `thinking` field produce no thinking blocks. Set `thinking: {type: "adaptive"}` explicitly to enable it. Thinking content is **omitted by default** (`display: "omitted"`) — set `display: "summarized"` to see thinking text in responses.
 
 - Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/adaptive-thinking](https://docs.anthropic.com/en/build-with-claude/adaptive-thinking)
 - Bedrock docs: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html)
@@ -223,6 +239,8 @@ For Converse API specifically, Bedrock also supports **Simplified Cache Manageme
 
 > ⚠️ **Model compatibility**: The `eager_input_streaming` field is only supported on Claude 4.6 models (Opus 4.6 / Sonnet 4.6). On Sonnet 4.5 and earlier models, this field causes a 400 error (`Extra inputs are not permitted`), even with the `fine-grained-tool-streaming-2025-05-14` beta header. However, Sonnet 4.5 already streams tool input JSON deltas in fine-grained chunks by default (20+ chunks observed), so no extra parameter is needed. Proxy layers should conditionally inject this field based on model version.
 
+> ⚠️ **Not available on Opus 4.7**: On Bedrock, Opus 4.7 also rejects the `eager_input_streaming` field (`Extra inputs are not permitted`), with or without the beta header. This is a Bedrock-side gap, not yet adapted for Opus 4.7.
+
 - Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming](https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming)
 - Related issue: [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
 
@@ -241,13 +259,15 @@ For Converse API specifically, Bedrock also supports **Simplified Cache Manageme
 
 **How it works on Bedrock**: Beta header `context-management-2025-06-27` is passed through directly.
 
-- Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/context-editing](https://docs.anthropic.com/en/build-with-claude/context-editing)
+> ⚠️ **Not available on Opus 4.7**: On Bedrock, Opus 4.7 rejects message `id` fields (`messages.0.id: Extra inputs are not permitted`). Context Editing is not functional on Opus 4.7 — Bedrock-side gap.
 
 ### Bash Tool
 
 **What it does**: A client-side tool that lets Claude generate bash commands for the client to execute. The model produces `tool_use` blocks with bash commands; the client runs them locally and returns results. Used by Claude Code for running shell commands.
 
 **How it works on Bedrock**: Supported on both InvokeModel and Converse APIs with the `computer-use-2025-01-24` beta header. Tool type: `bash_20250124`.
+
+> ⚠️ **Not available on Opus 4.7**: On Bedrock, Opus 4.7 rejects `bash_20250124` and `text_editor_20250728` tool types (`tool type 'xxx' is not supported for this model`), regardless of which `computer-use` beta header is used. Opus 4.6 works normally.
 
 - Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/bash-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/bash-tool)
 
@@ -271,6 +291,8 @@ These features work on Bedrock but only through the InvokeModel API (not Convers
 **What it does**: When you have hundreds or thousands of tools, loading all definitions into the context window is impractical (consumes tokens and degrades tool selection accuracy). Tool Search lets Claude dynamically discover and load only the 3-5 tools it needs for each request, from a catalog of up to 10,000 tools.
 
 **How it works on Bedrock**: Supported via InvokeModel API only. The Anthropic beta header `advanced-tool-use-2025-11-20` must be mapped to Bedrock's `tool-search-tool-2025-10-19`. If your application uses Converse API, you need to switch to InvokeModel API for requests that include tool search.
+
+> ⚠️ **Not available on Opus 4.7**: On Bedrock, Opus 4.7 rejects `tool_search_tool_regex_20251119` tool type (`not supported for this model`). Opus 4.6 / Sonnet 4.6 work normally.
 
 - Anthropic docs: [https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool)
 - Reference implementation: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/converters/anthropic_to_bedrock.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/converters/anthropic_to_bedrock.py) — `_map_beta_headers()`
@@ -363,6 +385,8 @@ A complete reference implementation is available: [anthropic_api_converter](http
 
 > ⚠️ **Important limitation**: CountTokens API **only supports in-region model IDs** (e.g., `anthropic.claude-sonnet-4-6`). Cross-region (`us.anthropic.claude-sonnet-4-6`) and global (`global.anthropic.claude-sonnet-4-6`) prefixes return `The provided model doesn't support counting tokens`. Proxy layers must strip the `us.`/`eu.`/`global.` prefix when calling CountTokens.
 
+> ⚠️ **Opus 4.7 not supported by CountTokens**: Both `anthropic.claude-opus-4-7` and `global.anthropic.claude-opus-4-7` return "doesn't support counting tokens". Opus 4.7 currently only has global deployment with no in-region model ID, so CountTokens API is unavailable. Use a local tokenizer for estimation.
+
 **How to implement**: Build a `POST /v1/messages/count_tokens` endpoint in the proxy layer that converts Anthropic-format requests to Bedrock's CountTokens API format. Use in-region model IDs (strip cross-region/global prefixes). Fall back to local tokenizer estimation for unsupported models.
 
 - Anthropic docs: [https://docs.anthropic.com/en/build-with-claude/token-counting](https://docs.anthropic.com/en/build-with-claude/token-counting)
@@ -427,6 +451,16 @@ The Anthropic API uses `anthropic-beta` headers to enable experimental features.
 | `tool-examples-2025-10-29` | Tool Input Examples (InvokeModel only) | ✅ |
 | `tool-search-tool-2025-10-19` | Tool Search (InvokeModel only) | ✅ |
 | `fine-grained-tool-streaming-2025-05-14` | Fine-grained Tool Streaming (now GA) | ✅ |
+| `task-budgets-2026-03-13` | Task Budgets (new in Opus 4.7) | ✅ |
+
+> ⚠️ **Opus 4.7 functional gaps**: All beta headers above are accepted by Bedrock on Opus 4.7 (no "invalid beta flag" error), but functional testing with real payloads reveals several features are **not working** on Opus 4.7 (Bedrock-side gap, not yet adapted):
+> - `computer-use-2025-01-24` / `computer-use-2025-11-24`: bash/text_editor tool types return `not supported for this model`
+> - `context-management-2025-06-27`: message `id` field returns `Extra inputs are not permitted`
+> - `tool-search-tool-2025-10-19`: tool_search tool types return `not supported for this model`
+> - `fine-grained-tool-streaming-2025-05-14`: `eager_input_streaming` field returns `Extra inputs are not permitted`
+> - `token-efficient-tools-2025-02-19`: no effect — input_tokens identical with/without header (built-in for Claude 4+)
+>
+> These features work normally on Opus 4.6 / Sonnet 4.6. `tool-examples-2025-10-29` and `effort` (now GA) are fully functional on Opus 4.7.
 | `pdfs-2024-09-25` | PDF Support (now GA) | ✅ |
 | `output-128k-2025-02-19` | 128k Output (now GA) | ✅ |
 | `token-counting-2024-11-01` | Token Counting | ❌ Accepted but not functional (Bedrock has native CountTokens API — no header needed) |

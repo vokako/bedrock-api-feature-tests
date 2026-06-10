@@ -21,6 +21,8 @@ MODELS = [
     ("Sonnet 4.6 in-region", "anthropic.claude-sonnet-4-6"),
     ("Sonnet 4.6 global", "global.anthropic.claude-sonnet-4-6"),
     ("Opus 4.6 in-region", "anthropic.claude-opus-4-6-v1"),
+    ("Opus 4.7 in-region", "anthropic.claude-opus-4-7"),
+    ("Opus 4.7 global", "global.anthropic.claude-opus-4-7"),
     ("Sonnet 4.5", "anthropic.claude-sonnet-4-5-20250929-v1:0"),
     ("Haiku 4.5", "anthropic.claude-haiku-4-5-20251001-v1:0"),
 ]
