@@ -76,22 +76,48 @@ print(bedrock.get_account_data_retention())   # {'mode': 'provider_data_share', 
 
 需要 boto3 / botocore 较新版本（botocore ≥ 1.43，含 `PutAccountDataRetention` 操作）。
 
-### 方式 B：仅 project 级开启（影响范围更小，推荐）
+### 方式 B：project 级开启（影响范围最小，推荐隔离场景）
 
-如果只想在某个 project 里用 Fable 5，可以只在该 project 开启，不动整个账号：
+只想让某个 project 里的 Fable 5 流量被共享、其他流量（含 Opus 4.7/4.8）保持不共享时，用 project 级。**仅 mantle 端点支持**（runtime/InvokeModel 没有 project 概念）。
+
+> 说明：account 与 project 是两套**独立**配置，且各自又分 control-plane / mantle 两份。effective mode 解析顺序：`project → account → model default`（取第一个非 `inherit` 的值）。
+
+**1) 列出 / 创建 project**
 
 ```bash
-curl https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/proj_abc123 \
-  -H "x-api-key: $BEDROCK_API_KEY" \
-  -H "Content-Type: application/json" \
+# 列出（账号自带一个 default project，且 default 不可修改）
+curl https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
+  -H "x-api-key: $BEDROCK_API_KEY"
+
+# 创建一个新 project
+curl -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
+  -H "x-api-key: $BEDROCK_API_KEY" -H "Content-Type: application/json" \
+  -d '{ "name": "fable5-isolated" }'
+# 返回 id 形如 proj_xxxxxxxxxxxx
+```
+
+**2) 给该 project 设 `provider_data_share`**
+
+```bash
+curl -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/proj_xxxxxxxxxxxx \
+  -H "x-api-key: $BEDROCK_API_KEY" -H "Content-Type: application/json" \
   -d '{ "data_retention": { "mode": "provider_data_share" } }'
 ```
 
+**3) 调用时把请求绑定到该 project**（见下文「方式二：Messages API」的 `anthropic-workspace-id` header）。只有带了 project header 的请求才用该 project 的保留模式；其他请求落到 default project（保持 inherit），不受影响。
+
 ### 怎么改回去
 
-再调一次 API 改成 `inherit` / `default` / `none` 即可。但**已经发送的流量无法撤回**。
+把对应 scope（account 或 project）再设成 `inherit` / `default` / `none` 即可。但**已经发送的流量无法撤回**。
 
 ## 四、如何调用
+
+Fable 5 有两条调用路径，**数据保留的配置 scope 不同**：
+
+| 路径 | 端点 | 数据保留 scope | project 隔离 |
+|------|------|---------------|:---:|
+| 方式一：InvokeModel | `bedrock-runtime` | 仅 account 级 | ❌ |
+| 方式二：Messages API | `bedrock-mantle` | account + **project** | ✅ |
 
 ### Model ID
 
@@ -101,7 +127,7 @@ curl https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/proj_abc1
 | **Global cross-region（推荐）** | `global.anthropic.claude-fable-5` |
 | US geo | `us.anthropic.claude-fable-5`（需账号在该 geo 启用） |
 
-### 示例代码（InvokeModel）
+### 方式一：InvokeModel（account 级 data share）
 
 ```python
 import json, boto3
@@ -128,6 +154,42 @@ for block in data["content"]:
 
 print("stop_reason:", data["stop_reason"])
 ```
+
+> 走 runtime 时，account（control-plane）的数据保留必须是 `provider_data_share`（方式 A）。runtime 没有 project，无法只隔离 Fable 5。
+
+### 方式二：Messages API + project（可隔离 data share，推荐）
+
+用官方 `AnthropicBedrockMantle` SDK（`pip install -U "anthropic[bedrock]"`），通过 `anthropic-workspace-id` header 把请求绑定到开了 `provider_data_share` 的 project：
+
+```python
+import os
+# 若环境里有 AWS_BEARER_TOKEN_BEDROCK 且其 API key 未绑定该 project，
+# pop 掉走 IAM 凭证；或确保该 API key 属于目标 project
+os.environ.pop("AWS_BEARER_TOKEN_BEDROCK", None)
+
+from anthropic import AnthropicBedrockMantle
+
+client = AnthropicBedrockMantle(aws_region="us-east-1")
+
+msg = client.messages.create(
+    model="anthropic.claude-fable-5",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "What is 17 + 25?"}],
+    # 关键：绑定到开了 provider_data_share 的 project
+    extra_headers={"anthropic-workspace-id": "proj_xxxxxxxxxxxx"},
+)
+
+for block in msg.content:
+    if block.type == "text":
+        print(block.text)
+    elif block.type == "thinking":
+        print("[thinking]", block.thinking)
+print("stop_reason:", msg.stop_reason)
+```
+
+> **project header 因 API 格式而异**：Anthropic Messages 格式（`/anthropic/v1/messages`）用 `anthropic-workspace-id`；OpenAI 兼容格式（`/v1/...`，如 `/v1/models`）用 `openai-project`。用错会报 `The openai-project header is not supported for this API format. Use anthropic-workspace-id instead.`
+>
+> 不带 project header 的请求会落到 default project（`inherit`→`default`），Fable 5 会返回 `data retention mode 'default' is not available for this model`。
 
 ## 五、特性兼容性（2026-06-10 实测）
 
