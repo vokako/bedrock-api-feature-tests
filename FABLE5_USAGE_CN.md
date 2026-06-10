@@ -119,7 +119,7 @@ curl -s https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
 export PROJECT_ID=$(curl -s -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
   -H "x-api-key: $BEDROCK_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{ "name": "fable5-isolated" }' | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+  -d '{ "name": "fable5-isolated" }' | jq -r '.id')
 echo "created: $PROJECT_ID"
 # => created: proj_xxxxxxxxxxxx
 
@@ -193,21 +193,17 @@ curl -s -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
 或者一行命令自动写入（基于上面已 export 的 `$PROJECT_ID`）：
 
 ```bash
-# 用 python 自动把 project id 写进 settings.json
-python3 -c "
-import json, os
-path = os.path.expanduser('~/.claude/settings.json')
-cfg = json.load(open(path)) if os.path.exists(path) else {}
-cfg.setdefault('env', {}).update({
-    'CLAUDE_CODE_USE_MANTLE': '1',
-    'AWS_REGION': 'us-east-1',
-    'ANTHROPIC_MODEL': 'anthropic.claude-fable-5',
-    'ANTHROPIC_DEFAULT_HAIKU_MODEL': 'anthropic.claude-haiku-4-5',
-    'ANTHROPIC_CUSTOM_HEADERS': f'anthropic-workspace-id: {os.environ[\"PROJECT_ID\"]}',
-})
-json.dump(cfg, open(path, 'w'), indent=2)
-print(f'wrote {path} with project={os.environ[\"PROJECT_ID\"]}')
-"
+# 用 jq 自动把 project id 写进 settings.json
+SETTINGS=~/.claude/settings.json
+[ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+jq --arg pid "$PROJECT_ID" '.env += {
+  "CLAUDE_CODE_USE_MANTLE": "1",
+  "AWS_REGION": "us-east-1",
+  "ANTHROPIC_MODEL": "anthropic.claude-fable-5",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic.claude-haiku-4-5",
+  "ANTHROPIC_CUSTOM_HEADERS": ("anthropic-workspace-id: " + $pid)
+}' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+echo "wrote $SETTINGS with project=$PROJECT_ID"
 ```
 
 重启 Claude Code 后 `/status` 显示 `Amazon Bedrock (Mantle)` 即生效。所有请求自动带上该 project 的 workspace header，走 `provider_data_share`。
