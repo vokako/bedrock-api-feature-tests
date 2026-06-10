@@ -55,6 +55,7 @@ uv run python test_01_messages_basic.py
 | 19 | `test_19_claude46_changes.py` | Claude 4.6 Changes (prefill, output_config, deprecations) | — |
 | 20 | `test_20_count_tokens.py` | CountTokens API (in-region only) | — |
 | 21 | `test_21_claude47_changes.py` | Claude 4.7 Changes (breaking changes, thinking display, task budgets) | `task-budgets-2026-03-13` |
+| 22 | `test_22_fable5.py` | Claude Fable 5 feature compatibility (requires `provider_data_share`) | — |
 
 ## Configuration
 
@@ -66,3 +67,4 @@ Edit `helpers.py` to change:
 
 - [ANTHROPIC_API_ON_BEDROCK_CN.md](ANTHROPIC_API_ON_BEDROCK_CN.md) — 中文版：Anthropic API 各特性在 Bedrock 上的支持情况
 - [ANTHROPIC_API_ON_BEDROCK_EN.md](ANTHROPIC_API_ON_BEDROCK_EN.md) — English: Anthropic API Feature Compatibility on Amazon Bedrock
+- [FABLE5_USAGE_CN.md](FABLE5_USAGE_CN.md) — 中文版：Claude Fable 5 使用说明（含 data retention / provider_data_share 开启步骤）
