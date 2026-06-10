@@ -30,7 +30,10 @@
         "bedrock-mantle:GetProject",
         "bedrock-mantle:UpdateProject",
         "bedrock-mantle:ListModels",
-        "bedrock-mantle:GetModel"
+        "bedrock-mantle:GetModel",
+        "bedrock-mantle:CallWithBearerToken",
+        "bedrock-mantle:ListTagsForResource",
+        "bedrock-mantle:CreateInference"
       ],
       "Resource": "*"
     }

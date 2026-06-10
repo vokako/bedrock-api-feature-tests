@@ -69,7 +69,10 @@ Fable 5 是 **"covered model"**，AWS 强制要求：使用前必须把账号（
         "bedrock-mantle:GetProject",
         "bedrock-mantle:UpdateProject",
         "bedrock-mantle:ListModels",
-        "bedrock-mantle:GetModel"
+        "bedrock-mantle:GetModel",
+        "bedrock-mantle:CallWithBearerToken",
+        "bedrock-mantle:ListTagsForResource",
+        "bedrock-mantle:CreateInference"
       ],
       "Resource": "*"
     }
