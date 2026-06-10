@@ -43,20 +43,39 @@ Fable 5 是 **"covered model"**，AWS 强制要求：使用前必须把账号（
 
 ### 前提：IAM 权限
 
-执行账号的 IAM 身份需要 `bedrock:PutAccountDataRetention` 权限：
+执行账号的 IAM 身份需要以下权限（覆盖 control-plane + mantle 两条路径）：
 
 ```json
 {
-  "Effect": "Allow",
-  "Action": [
-    "bedrock:GetAccountDataRetention",
-    "bedrock:PutAccountDataRetention"
-  ],
-  "Resource": "*"
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DataRetentionControlPlane",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:GetAccountDataRetention",
+        "bedrock:PutAccountDataRetention"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DataRetentionMantle",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock-mantle:GetAccountDataRetention",
+        "bedrock-mantle:PutAccountDataRetention",
+        "bedrock-mantle:ListProjects",
+        "bedrock-mantle:CreateProject",
+        "bedrock-mantle:GetProject",
+        "bedrock-mantle:UpdateProject",
+        "bedrock-mantle:ListModels",
+        "bedrock-mantle:GetModel"
+      ],
+      "Resource": "*"
+    }
+  ]
 }
 ```
-
-> 如果走 Messages API（`bedrock-mantle` endpoint），对应 action 是 `bedrock-mantle:PutAccountDataRetention`，建议两个都加。
 
 > ⚠️ 注意：如果环境里设了 `AWS_BEARER_TOKEN_BEDROCK`，boto3 会用那个 API key 而不是 IAM 凭证。要走 IAM，先 unset 这个环境变量，或确保该 API key 用户也有上述权限。
 
