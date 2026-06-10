@@ -89,32 +89,57 @@ print(bedrock.get_account_data_retention())   # {'mode': 'provider_data_share', 
 `none` = 默认任何模型都零留存，作为隔离的安全基线。
 
 ```bash
-# 查当前
+# 查当前 account 保留模式
 curl https://bedrock-mantle.us-east-1.api.aws/v1/data_retention \
   -H "x-api-key: $BEDROCK_API_KEY"
+# => {"mode": "inherit", "updated_at": ...}
 
-# 设为 none
+# 设为 none（零留存基线）
 curl -X PUT https://bedrock-mantle.us-east-1.api.aws/v1/data_retention \
-  -H "x-api-key: $BEDROCK_API_KEY" -H "Content-Type: application/json" \
+  -H "x-api-key: $BEDROCK_API_KEY" \
+  -H "Content-Type: application/json" \
   -d '{ "mode": "none" }'
+# => {"mode": "none", "updated_at": ...}
+
+# 再次确认
+curl https://bedrock-mantle.us-east-1.api.aws/v1/data_retention \
+  -H "x-api-key: $BEDROCK_API_KEY"
+# => {"mode": "none", "updated_at": ...}
 ```
-实测：`{"mode": "none", "updated_at": ...}`
 
 **第 2 步：创建 project 并开启 project 级 `provider_data_share`**
 
 ```bash
-# 创建（default project 不可修改，必须新建）
+# 列出现有 project（账号自带一个 default，不可修改）
+curl https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
+  -H "x-api-key: $BEDROCK_API_KEY"
+# => {"data": [{"id": "default", "name": "default", "data_retention": {"mode": "inherit"}, ...}]}
+
+# 创建新 project
 curl -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
-  -H "x-api-key: $BEDROCK_API_KEY" -H "Content-Type: application/json" \
+  -H "x-api-key: $BEDROCK_API_KEY" \
+  -H "Content-Type: application/json" \
   -d '{ "name": "fable5-isolated" }'
-# 返回 id 形如 proj_xxxxxxxxxxxx
+# => {"id": "proj_xxxxxxxxxxxx", "name": "fable5-isolated", "data_retention": {"mode": "inherit"}, ...}
 
 # 给该 project 设 provider_data_share
 curl -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/proj_xxxxxxxxxxxx \
-  -H "x-api-key: $BEDROCK_API_KEY" -H "Content-Type: application/json" \
+  -H "x-api-key: $BEDROCK_API_KEY" \
+  -H "Content-Type: application/json" \
   -d '{ "data_retention": { "mode": "provider_data_share" } }'
+# => {"id": "proj_xxxxxxxxxxxx", "data_retention": {"mode": "provider_data_share"}, ...}
+
+# 确认 project 配置
+curl https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/proj_xxxxxxxxxxxx \
+  -H "x-api-key: $BEDROCK_API_KEY"
+# => {"id": "proj_xxxxxxxxxxxx", "data_retention": {"mode": "provider_data_share"}, ...}
+
+# （可选）查 Fable 5 在该 project 下的生效 retention
+curl https://bedrock-mantle.us-east-1.api.aws/v1/models/anthropic.claude-fable-5 \
+  -H "x-api-key: $BEDROCK_API_KEY" \
+  -H "openai-project: proj_xxxxxxxxxxxx"
+# => {"status": "available", "data_retention": {"mode": "provider_data_share", "source": "project", "allowed_modes": ["provider_data_share"]}}
 ```
-实测：`project data_retention = {"mode": "provider_data_share"}`
 
 **第 3 步：测试 Fable 5 —— 加 header vs 不加 header**
 
@@ -123,16 +148,20 @@ curl -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/p
 ```bash
 # 不加 header：落到 account=none，Fable 5 被拒
 curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
-  -H "x-api-key: $BEDROCK_API_KEY" -H "anthropic-version: 2023-06-01" \
+  -H "x-api-key: $BEDROCK_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
   -d '{"model":"anthropic.claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"Say hi"}]}'
+# => {"error": {"message": "data retention mode 'none' is not available for this model"}}
 
 # 加 header：落到 project=provider_data_share，Fable 5 可用
 curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
-  -H "x-api-key: $BEDROCK_API_KEY" -H "anthropic-version: 2023-06-01" \
+  -H "x-api-key: $BEDROCK_API_KEY" \
+  -H "anthropic-version: 2023-06-01" \
   -H "anthropic-workspace-id: proj_xxxxxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{"model":"anthropic.claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"Say hi"}]}'
+# => {"content": [{"type": "text", "text": "Hello there, friend!"}], "stop_reason": "end_turn", ...}
 ```
 
 实测结果：
@@ -144,7 +173,7 @@ curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
 
 这就证明了隔离生效：**account 零留存，只有显式绑定到该 project 的请求才会被记录共享**。其他模型（Opus 4.7/4.8 等）在不带 header 时走 account=`none`，不被留存。
 
-> project header 因 API 格式而异：Messages 格式（`/anthropic/v1/messages`）用 `anthropic-workspace-id`；OpenAI 兼容格式（`/v1/...`）用 `openai-project`。
+> project header 因 API 格式而异：Messages 格式（`/anthropic/v1/messages`）用 `anthropic-workspace-id`；OpenAI 兼容格式（`/v1/...`，如 `/v1/models`）用 `openai-project`。
 
 ### 怎么改回去
 
