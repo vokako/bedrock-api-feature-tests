@@ -213,22 +213,6 @@ curl -s -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
 }
 ```
 
-或者一行命令自动写入（基于上面已 export 的 `$PROJECT_ID`）：
-
-```bash
-# 用 jq 自动把 project id 写进 settings.json
-SETTINGS=~/.claude/settings.json
-[ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
-jq --arg pid "$PROJECT_ID" '.env += {
-  "CLAUDE_CODE_USE_MANTLE": "1",
-  "AWS_REGION": "us-east-1",
-  "ANTHROPIC_MODEL": "anthropic.claude-fable-5",
-  "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic.claude-haiku-4-5",
-  "ANTHROPIC_CUSTOM_HEADERS": ("anthropic-workspace-id: " + $pid)
-}' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
-echo "wrote $SETTINGS with project=$PROJECT_ID"
-```
-
 重启 Claude Code 后 `/status` 显示 `Amazon Bedrock (Mantle)` 即生效。所有请求自动带上该 project 的 workspace header，走 `provider_data_share`。
 
 > project header 因 API 格式而异：Messages 格式（`/anthropic/v1/messages`）用 `anthropic-workspace-id`；OpenAI 兼容格式（`/v1/...`，如 `/v1/models`）用 `openai-project`。
