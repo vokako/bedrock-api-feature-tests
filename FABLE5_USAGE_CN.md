@@ -110,10 +110,6 @@ curl https://bedrock-mantle.us-east-1.api.aws/v1/data_retention \
 **第 2 步：创建 project 并开启 project 级 `provider_data_share`**
 
 ```bash
-# 列出现有 project（账号自带一个 default，不可修改）
-curl -s https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
-  -H "x-api-key: $BEDROCK_API_KEY"
-# => {"data": [{"id": "default", "name": "default", "data_retention": {"mode": "inherit"}, ...}]}
 
 # 创建新 project，自动提取返回的 project id
 # （如果已存在同名 project，先查出来复用）
