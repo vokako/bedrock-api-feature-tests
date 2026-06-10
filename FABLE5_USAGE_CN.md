@@ -173,6 +173,24 @@ curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
 
 这就证明了隔离生效：**account 零留存，只有显式绑定到该 project 的请求才会被记录共享**。其他模型（Opus 4.7/4.8 等）在不带 header 时走 account=`none`，不被留存。
 
+**在 Claude Code 中使用该 project**
+
+编辑 `~/.claude/settings.json`，在 `env` 中加入以下配置（Claude Code ≥ v2.1.94）：
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_USE_MANTLE": "1",
+    "AWS_REGION": "us-east-1",
+    "ANTHROPIC_MODEL": "anthropic.claude-fable-5",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic.claude-haiku-4-5",
+    "ANTHROPIC_CUSTOM_HEADERS": "anthropic-workspace-id: proj_xxxxxxxxxxxx"
+  }
+}
+```
+
+重启 Claude Code 后 `/status` 显示 `Amazon Bedrock (Mantle)` 即生效。所有请求自动带上该 project 的 workspace header，走 `provider_data_share`。
+
 > project header 因 API 格式而异：Messages 格式（`/anthropic/v1/messages`）用 `anthropic-workspace-id`；OpenAI 兼容格式（`/v1/...`，如 `/v1/models`）用 `openai-project`。
 
 ### 怎么改回去
@@ -260,49 +278,6 @@ print("stop_reason:", msg.stop_reason)
 > **project header 因 API 格式而异**：Anthropic Messages 格式（`/anthropic/v1/messages`）用 `anthropic-workspace-id`；OpenAI 兼容格式（`/v1/...`，如 `/v1/models`）用 `openai-project`。用错会报 `The openai-project header is not supported for this API format. Use anthropic-workspace-id instead.`
 >
 > 不带 project header 的请求会落到 default project（`inherit`→`default`），Fable 5 会返回 `data retention mode 'default' is not available for this model`。
-
-### 方式三：Claude Code 配置（走 Mantle + project 隔离）
-
-在 `~/.claude/settings.json` 的 `env` 块中配置，Claude Code 重启后生效：
-
-```json
-{
-  "env": {
-    "CLAUDE_CODE_USE_BEDROCK": "1",
-    "CLAUDE_CODE_USE_MANTLE": "1",
-    "AWS_REGION": "us-east-1",
-    "ANTHROPIC_MODEL": "anthropic.claude-fable-5",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic.claude-haiku-4-5",
-    "ANTHROPIC_CUSTOM_HEADERS": "anthropic-workspace-id: proj_xxxxxxxxxxxx"
-  }
-}
-```
-
-各配置项说明：
-
-| 配置项 | 作用 |
-|--------|------|
-| `CLAUDE_CODE_USE_MANTLE=1` | 启用 Mantle 端点（Fable 5 只在 Mantle 上） |
-| `CLAUDE_CODE_USE_BEDROCK=1` | 保留 runtime 端点（`/model opus` 等可切回 Opus 走 InvokeModel） |
-| `ANTHROPIC_MODEL` | 默认主模型，用 Mantle 格式：`anthropic.claude-fable-5`（**无** `global.`/`us.` 前缀、无版本后缀） |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | 后台小模型（标题生成等），Mantle 格式：`anthropic.claude-haiku-4-5` |
-| `ANTHROPIC_CUSTOM_HEADERS` | 注入 project header，绑定到开了 `provider_data_share` 的 project。多个 header 用 `\n` 分隔 |
-| `AWS_REGION` | Fable 5 在 `us-east-1` 可用 |
-
-> ⚠️ **Model ID 格式**：Mantle 用 `anthropic.xxx`（无 `global.`/`us.` 前缀），用 `global.anthropic.claude-fable-5` 会报 `model not served on Mantle`。如果同时保留 `ANTHROPIC_DEFAULT_OPUS_MODEL` 等走 runtime 的模型，那些仍用 `global.` 前缀。
-
-验证：
-
-```bash
-# 重启 Claude Code 后
-/status
-# 应显示：Provider: Amazon Bedrock + Amazon Bedrock (Mantle)
-
-/model
-# 应显示当前选中 anthropic.claude-fable-5
-```
-
-切换模型：用 `/model opus` 切到 Opus（走 runtime），用 `/model anthropic.claude-fable-5` 切回 Fable 5（走 Mantle）。
 
 ## 五、特性兼容性（2026-06-10 实测）
 
