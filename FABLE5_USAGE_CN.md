@@ -116,11 +116,19 @@ curl -s https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
 # => {"data": [{"id": "default", "name": "default", "data_retention": {"mode": "inherit"}, ...}]}
 
 # 创建新 project，自动提取返回的 project id
-export PROJECT_ID=$(curl -s -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
-  -H "x-api-key: $BEDROCK_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{ "name": "fable5-isolated" }' | jq -r '.id')
-echo "created: $PROJECT_ID"
+# （如果已存在同名 project，先查出来复用）
+export PROJECT_ID=$(curl -s https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
+  -H "x-api-key: $BEDROCK_API_KEY" | jq -r '.data[] | select(.name=="fable5-isolated") | .id')
+
+if [ -z "$PROJECT_ID" ]; then
+  export PROJECT_ID=$(curl -s -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
+    -H "x-api-key: $BEDROCK_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{ "name": "fable5-isolated" }' | jq -r '.id')
+  echo "created: $PROJECT_ID"
+else
+  echo "reusing existing: $PROJECT_ID"
+fi
 # => created: proj_xxxxxxxxxxxx
 
 # 给该 project 设 provider_data_share
