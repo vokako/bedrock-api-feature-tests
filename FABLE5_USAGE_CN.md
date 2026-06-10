@@ -111,34 +111,35 @@ curl https://bedrock-mantle.us-east-1.api.aws/v1/data_retention \
 
 ```bash
 # 列出现有 project（账号自带一个 default，不可修改）
-curl https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
+curl -s https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
   -H "x-api-key: $BEDROCK_API_KEY"
 # => {"data": [{"id": "default", "name": "default", "data_retention": {"mode": "inherit"}, ...}]}
 
-# 创建新 project
-curl -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
+# 创建新 project，自动提取返回的 project id
+export PROJECT_ID=$(curl -s -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects \
   -H "x-api-key: $BEDROCK_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{ "name": "fable5-isolated" }'
-# => {"id": "proj_xxxxxxxxxxxx", "name": "fable5-isolated", "data_retention": {"mode": "inherit"}, ...}
+  -d '{ "name": "fable5-isolated" }' | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+echo "created: $PROJECT_ID"
+# => created: proj_xxxxxxxxxxxx
 
 # 给该 project 设 provider_data_share
-curl -X POST https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/proj_xxxxxxxxxxxx \
+curl -s -X POST "https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/$PROJECT_ID" \
   -H "x-api-key: $BEDROCK_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{ "data_retention": { "mode": "provider_data_share" } }'
-# => {"id": "proj_xxxxxxxxxxxx", "data_retention": {"mode": "provider_data_share"}, ...}
+# => {"id": "proj_xxx", "data_retention": {"mode": "provider_data_share"}, ...}
 
 # 确认 project 配置
-curl https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/proj_xxxxxxxxxxxx \
+curl -s "https://bedrock-mantle.us-east-1.api.aws/v1/organization/projects/$PROJECT_ID" \
   -H "x-api-key: $BEDROCK_API_KEY"
-# => {"id": "proj_xxxxxxxxxxxx", "data_retention": {"mode": "provider_data_share"}, ...}
+# => {"id": "proj_xxx", "data_retention": {"mode": "provider_data_share"}, ...}
 
 # （可选）查 Fable 5 在该 project 下的生效 retention
-curl https://bedrock-mantle.us-east-1.api.aws/v1/models/anthropic.claude-fable-5 \
+curl -s https://bedrock-mantle.us-east-1.api.aws/v1/models/anthropic.claude-fable-5 \
   -H "x-api-key: $BEDROCK_API_KEY" \
-  -H "openai-project: proj_xxxxxxxxxxxx"
-# => {"status": "available", "data_retention": {"mode": "provider_data_share", "source": "project", "allowed_modes": ["provider_data_share"]}}
+  -H "openai-project: $PROJECT_ID"
+# => {"status": "available", "data_retention": {"mode": "provider_data_share", "source": "project", ...}}
 ```
 
 **第 3 步：测试 Fable 5 —— 加 header vs 不加 header**
@@ -147,7 +148,7 @@ curl https://bedrock-mantle.us-east-1.api.aws/v1/models/anthropic.claude-fable-5
 
 ```bash
 # 不加 header：落到 account=none，Fable 5 被拒
-curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
+curl -s -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
   -H "x-api-key: $BEDROCK_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
   -H "Content-Type: application/json" \
@@ -155,10 +156,10 @@ curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
 # => {"error": {"message": "data retention mode 'none' is not available for this model"}}
 
 # 加 header：落到 project=provider_data_share，Fable 5 可用
-curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
+curl -s -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
   -H "x-api-key: $BEDROCK_API_KEY" \
   -H "anthropic-version: 2023-06-01" \
-  -H "anthropic-workspace-id: proj_xxxxxxxxxxxx" \
+  -H "anthropic-workspace-id: $PROJECT_ID" \
   -H "Content-Type: application/json" \
   -d '{"model":"anthropic.claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"Say hi"}]}'
 # => {"content": [{"type": "text", "text": "Hello there, friend!"}], "stop_reason": "end_turn", ...}
@@ -169,13 +170,13 @@ curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
 | 请求 | 生效 scope | 结果 |
 |------|-----------|------|
 | **不加** `anthropic-workspace-id` | account = `none` | ❌ 400 `data retention mode 'none' is not available for this model` |
-| **加** `anthropic-workspace-id=proj_xxx` | project = `provider_data_share` | ✅ `Hello there, friend!` |
+| **加** `anthropic-workspace-id=$PROJECT_ID` | project = `provider_data_share` | ✅ `Hello there, friend!` |
 
 这就证明了隔离生效：**account 零留存，只有显式绑定到该 project 的请求才会被记录共享**。其他模型（Opus 4.7/4.8 等）在不带 header 时走 account=`none`，不被留存。
 
 **在 Claude Code 中使用该 project**
 
-编辑 `~/.claude/settings.json`，在 `env` 中加入以下配置（Claude Code ≥ v2.1.94）：
+编辑 `~/.claude/settings.json`，在 `env` 中加入以下配置（Claude Code ≥ v2.1.94），将 `$PROJECT_ID` 替换为上面创建的实际值：
 
 ```json
 {
@@ -184,9 +185,29 @@ curl -X POST https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages \
     "AWS_REGION": "us-east-1",
     "ANTHROPIC_MODEL": "anthropic.claude-fable-5",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic.claude-haiku-4-5",
-    "ANTHROPIC_CUSTOM_HEADERS": "anthropic-workspace-id: proj_xxxxxxxxxxxx"
+    "ANTHROPIC_CUSTOM_HEADERS": "anthropic-workspace-id: <上面 $PROJECT_ID 的值>"
   }
 }
+```
+
+或者一行命令自动写入（基于上面已 export 的 `$PROJECT_ID`）：
+
+```bash
+# 用 python 自动把 project id 写进 settings.json
+python3 -c "
+import json, os
+path = os.path.expanduser('~/.claude/settings.json')
+cfg = json.load(open(path)) if os.path.exists(path) else {}
+cfg.setdefault('env', {}).update({
+    'CLAUDE_CODE_USE_MANTLE': '1',
+    'AWS_REGION': 'us-east-1',
+    'ANTHROPIC_MODEL': 'anthropic.claude-fable-5',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL': 'anthropic.claude-haiku-4-5',
+    'ANTHROPIC_CUSTOM_HEADERS': f'anthropic-workspace-id: {os.environ[\"PROJECT_ID\"]}',
+})
+json.dump(cfg, open(path, 'w'), indent=2)
+print(f'wrote {path} with project={os.environ[\"PROJECT_ID\"]}')
+"
 ```
 
 重启 Claude Code 后 `/status` 显示 `Amazon Bedrock (Mantle)` 即生效。所有请求自动带上该 project 的 workspace header，走 `provider_data_share`。
