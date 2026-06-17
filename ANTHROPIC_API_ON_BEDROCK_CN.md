@@ -50,6 +50,7 @@
 | Computer Use Tool | ✅ | ❌ | ❌ | 需自行实现 |
 | Agent Skills | ✅ | ❌ | ❌ | 需自行实现 |
 | Claude 4.7 Changes | — | — | ✅ | 验证 Opus 4.7 breaking changes | [test_21](test_21_claude47_changes.py) |
+| Mid-conversation System Messages | ✅ | ❓ | ✅ | 仅 Opus 4.8；官方文档称 Bedrock 不支持，实测可用 | [test_23](test_23_mid_conversation_system.py) |
 
 ---
 
@@ -744,3 +745,28 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://do
 - 自动为工具定义注入 `eager_input_streaming: true`
 
 参考实现: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py) — 请求入口，处理模型 ID 映射和 beta header 转换
+
+
+---
+
+### Mid-conversation System Messages（Opus 4.8）
+
+在 `messages` 数组里插入 `{"role": "system"}` 条目，用于在长会话中途追加 system 指令，而**不改动顶层 `system` 字段**，从而保留前缀的 prompt cache。Opus 4.8 引入，无需 beta header。
+
+| 维度 | 说明 |
+|------|------|
+| **Anthropic** | Opus 4.8 专属。`messages` 数组中可含 `role: system` 条目，须紧跟一个 `user` 轮（或以 server tool use 结尾的 `assistant` 轮），且为数组最后一项或紧接一个 `assistant` 轮。不能位于 `tool_use` 与其 `tool_result` 之间 |
+| **Bedrock** | **官方文档称 "not available on Amazon Bedrock"，但实测（InvokeModel + mantle）Opus 4.8 可用**：接受 `role:system` 条目且会遵守其指令。Opus 4.7 直接返回 400 `role 'system' is not supported on this model` |
+| **实现差异** | 与 Anthropic API 行为一致（实测层面）；文档与实测不符，依赖前请自行验证 |
+
+**实测结论（2026-06-17，`global.anthropic.claude-opus-4-8`，见 [test_23](test_23_mid_conversation_system.py)）：**
+
+1. **Opus 4.7**：`messages` 含 `role:system` → 400 `role 'system' is not supported on this model`（特性为 4.8 专属）
+2. **Opus 4.8**：接受且**遵守**中性 system 指令（测试："每条回复末尾加 `###MANGO###`" → 模型照做）
+3. **Cache 保留**：在已缓存前缀（system 字段，需 ≥ 4096 token）后追加 mid-sys 条目，下一次请求 `cache_read_input_tokens=9117`，前缀缓存未失效 ✅
+4. **Operator 优先级非绝对**：当 mid-sys 指令与用户请求**硬冲突**时（如 system 要求"只回一个词" vs 用户要求"写三段长文"），模型不会盲目执行 system，而是**指出冲突并倾向用户**。中性、不与用户对立的指令才稳定生效
+
+> ⚠️ 注意：早期测试若用对抗性措辞（如 "ignore the question / 忽略用户问题"）会被模型抵抗，造成"特性不生效"的误判。判定该特性是否可用，应使用**中性指令**。
+
+**参考链接**：
+- Anthropic: [https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages](https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages)（注：该页声明 Bedrock 不支持，与本仓库实测不符）

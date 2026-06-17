@@ -69,6 +69,7 @@ Bedrock provides two APIs for calling Claude models:
 | Computer Use Tool | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
 | Agent Skills | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
 | Claude 4.7 Changes | — | — | ✅ | Opus 4.7 breaking changes verified | [test_21](test_21_claude47_changes.py) |
+| Mid-conversation System Messages | ✅ | ❓ | ✅ | Opus 4.8 only; docs say unavailable on Bedrock, but verified working | [test_23](test_23_mid_conversation_system.py) |
 
 **Summary**: 18 out of 29 features are natively supported on Bedrock. The remaining 11 can be implemented via a proxy layer — a reference implementation is available at [anthropic_api_converter](https://github.com/xiehust/anthropic_api_converter).
 
@@ -543,3 +544,27 @@ The proxy handles:
 - Implementing server-side tools (Web Search, Code Execution, PTC) via agentic loops
 
 Reference implementation: [https://github.com/xiehust/anthropic_api_converter](https://github.com/xiehust/anthropic_api_converter)
+
+
+---
+
+### Mid-conversation System Messages (Opus 4.8)
+
+Insert a `{"role": "system"}` entry into the `messages` array to add system instructions partway through a conversation **without editing the top-level `system` field**, preserving the prompt cache for the prefix. Introduced in Opus 4.8; no beta header required.
+
+| Aspect | Details |
+|--------|---------|
+| **Anthropic** | Opus 4.8 only. A `role: system` entry must immediately follow a `user` turn (or an `assistant` turn ending in server tool use), and must be the last entry or precede an `assistant` turn. It cannot sit between a `tool_use` block and its `tool_result` |
+| **Bedrock** | **Anthropic docs state "not available on Amazon Bedrock", but empirically (InvokeModel + mantle) it works on Opus 4.8**: the `role:system` entry is accepted and its instruction is honored. Opus 4.7 returns 400 `role 'system' is not supported on this model` |
+| **Difference** | Behaviorally matches the first-party API (empirically); docs and observed behavior disagree — verify before relying on it |
+
+**Verified findings (2026-06-17, `global.anthropic.claude-opus-4-8`, see [test_23](test_23_mid_conversation_system.py)):**
+
+1. **Opus 4.7**: `role:system` in `messages` → 400 `role 'system' is not supported on this model` (4.8-only feature)
+2. **Opus 4.8**: accepts and **honors** a benign system instruction (test: "end every reply with `###MANGO###`" → model complied)
+3. **Cache preserved**: after a cached prefix (top-level `system`, needs ≥ 4096 tokens), appending a mid-sys entry yields `cache_read_input_tokens=9117` on the next request — the prefix cache is not invalidated ✅
+4. **Operator priority is not absolute**: in a hard conflict (system "one word only" vs user "write three paragraphs"), the model surfaces the conflict and leans toward the user rather than blindly enforcing the system instruction. Benign, non-adversarial instructions are honored reliably
+
+> ⚠️ Testing note: an adversarial instruction ("ignore the user's question") triggers the model's anti-override training and is resisted, which can be mistaken for "feature not working". Use neutral instructions to assess availability.
+
+**Reference**: [https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages](https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages) (note: this page states Bedrock is unsupported, contradicting this repo's measured results)
