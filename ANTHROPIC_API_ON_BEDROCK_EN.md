@@ -70,6 +70,7 @@ Bedrock provides two APIs for calling Claude models:
 | Agent Skills | ✅ | ❌ | ❌ | 🔧 Proxy implementation | — |
 | Claude 4.7 Changes | — | — | ✅ | Opus 4.7 breaking changes verified | [test_21](test_21_claude47_changes.py) |
 | Mid-conversation System Messages | ✅ | ❓ | ✅ | Opus 4.8 only; docs say unavailable on Bedrock, but verified working | [test_23](test_23_mid_conversation_system.py) |
+| Dynamic Workflows | ✅ | ❌ | ❌ | **Claude Code client feature, not an API feature**; "Bedrock support" means Claude Code using a Bedrock backend | — |
 
 **Summary**: 18 out of 29 features are natively supported on Bedrock. The remaining 11 can be implemented via a proxy layer — a reference implementation is available at [anthropic_api_converter](https://github.com/xiehust/anthropic_api_converter).
 
@@ -568,3 +569,38 @@ Insert a `{"role": "system"}` entry into the `messages` array to add system inst
 > ⚠️ Testing note: an adversarial instruction ("ignore the user's question") triggers the model's anti-override training and is resisted, which can be mistaken for "feature not working". Use neutral instructions to assess availability.
 
 **Reference**: [https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages](https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages) (note: this page states Bedrock is unsupported, contradicting this repo's measured results)
+
+
+---
+
+### Dynamic Workflows (Opus 4.8) — a Claude Code client feature, not an API feature
+
+Anthropic markets Dynamic Workflows as "available on the Anthropic API, Amazon Bedrock, Vertex AI, and Microsoft Foundry", which is **easily misread as a new Bedrock API capability**. In reality:
+
+> "Bedrock support" = **Claude Code (the client) can run Dynamic Workflows when configured with a Bedrock backend**. It does **not** mean the Bedrock InvokeModel/Messages API gained a dynamic-workflow field or endpoint.
+
+**Where it lives:**
+
+```
+Claude Code (client)
+  ├── Claude writes a JS orchestration script
+  ├── workflow runtime (inside the Claude Code process) executes it
+  └── the script spawns N subagents
+        └── each subagent → ordinary InvokeModel call → Bedrock backend
+```
+
+All orchestration, parallel scheduling, and script execution happen in the Claude Code client. Bedrock only sees a stream of **ordinary InvokeModel requests** and has no awareness of "Dynamic Workflows".
+
+| Aspect | Details |
+|--------|---------|
+| **Nature** | Claude Code client orchestration (research preview), not a model API feature |
+| **API layer** | Bedrock InvokeModel/Messages has **no corresponding field**; cannot be enabled via an API call |
+| **How to use** | Claude Code (CLI/Desktop/IDE), requires ≥ v2.1.154; trigger with the `ultracode` keyword, "use a workflow", or `/effort ultracode`; inspect with `/workflows` |
+| **Programmatic** | Only via Claude Code's `claude -p` (headless) or the Agent SDK — still the client layer |
+| **Bedrock limitation** | The bundled `/deep-research` depends on WebSearch, which is unavailable on the Bedrock backend → web-based workflows are incomplete; code-only workflows (edit files / run tests / parallel audits) work |
+
+> Contrast: [Mid-conversation System Messages](#mid-conversation-system-messages-opus-48) is a **real API feature** (a `role:system` entry in `messages`), verified working on Bedrock Opus 4.8; Dynamic Workflows is a **client feature** where "Bedrock support" only means the client can target a Bedrock backend.
+
+**References**:
+- Claude Code docs: [https://docs.claude.com/en/docs/claude-code/workflows](https://docs.claude.com/en/docs/claude-code/workflows)
+- Announcement: [https://claude.com/blog/introducing-dynamic-workflows-in-claude-code](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code)

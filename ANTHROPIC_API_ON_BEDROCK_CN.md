@@ -51,6 +51,7 @@
 | Agent Skills | ✅ | ❌ | ❌ | 需自行实现 |
 | Claude 4.7 Changes | — | — | ✅ | 验证 Opus 4.7 breaking changes | [test_21](test_21_claude47_changes.py) |
 | Mid-conversation System Messages | ✅ | ❓ | ✅ | 仅 Opus 4.8；官方文档称 Bedrock 不支持，实测可用 | [test_23](test_23_mid_conversation_system.py) |
+| Dynamic Workflows | ✅ | ❌ | ❌ | **Claude Code 客户端特性，非 API**；"支持 Bedrock"指 Claude Code 接 Bedrock 后端可用 | — |
 
 ---
 
@@ -770,3 +771,38 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://do
 
 **参考链接**：
 - Anthropic: [https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages](https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages)（注：该页声明 Bedrock 不支持，与本仓库实测不符）
+
+
+---
+
+### Dynamic Workflows（Opus 4.8）—— Claude Code 客户端特性，非 API 特性
+
+Anthropic 宣传 Dynamic Workflows "支持 Anthropic API / Amazon Bedrock / Vertex AI / Microsoft Foundry"，**容易被误解为 Bedrock API 新增了能力**。实际上：
+
+> "支持 Bedrock" = **Claude Code 这个客户端工具接 Bedrock 后端时能用 Dynamic Workflows**，**不是** Bedrock 的 InvokeModel/Messages API 多了 dynamic-workflow 字段或端点。
+
+**它在哪一层：**
+
+```
+Claude Code（客户端）
+  ├── Claude 写出一段 JS 编排脚本
+  ├── workflow runtime（在 Claude Code 进程内）执行脚本
+  └── 脚本拉起 N 个 subagent
+        └── 每个 subagent → 普通 InvokeModel 调用 → Bedrock 后端
+```
+
+编排、并行调度、脚本执行全在 Claude Code 客户端完成。Bedrock 只收到一堆**普通的 InvokeModel 请求**，对 "Dynamic Workflows" 无感知。
+
+| 维度 | 说明 |
+|------|------|
+| **本质** | Claude Code 客户端的编排能力（research preview），不是模型 API 特性 |
+| **API 层** | Bedrock InvokeModel/Messages **无任何对应字段**，无法通过调 API 启用 |
+| **如何用** | Claude Code（CLI/Desktop/IDE），需 ≥ v2.1.154；触发：prompt 加 `ultracode` 关键词、说"用 workflow"、或 `/effort ultracode`；用 `/workflows` 查看 |
+| **程序化** | 只能走 Claude Code 的 `claude -p`（headless）或 Agent SDK，仍是客户端层 |
+| **Bedrock 限制** | 内置 `/deep-research` 依赖 WebSearch，而 WebSearch 在 Bedrock 后端不可用 → 联网类 workflow 跑不全；纯代码类（改文件/跑测试/并行审计）可正常跑 |
+
+> 对比：[Mid-conversation System Messages](#mid-conversation-system-messagesopus-48) 是**真正的 API 特性**（messages 里塞 `role:system`），Bedrock Opus 4.8 实测可用；而 Dynamic Workflows 是**客户端特性**，"支持 Bedrock"只是指客户端能接 Bedrock 后端。
+
+**参考链接**：
+- Claude Code 文档: [https://docs.claude.com/en/docs/claude-code/workflows](https://docs.claude.com/en/docs/claude-code/workflows)
+- 公告: [https://claude.com/blog/introducing-dynamic-workflows-in-claude-code](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code)
