@@ -71,6 +71,8 @@ Bedrock provides two APIs for calling Claude models:
 | Claude 4.7 Changes | — | — | ✅ | Opus 4.7 breaking changes verified | [test_21](test_21_claude47_changes.py) |
 | Mid-conversation System Messages | ✅ | ❓ | ✅ | Opus 4.8 only; docs say unavailable on Bedrock, but verified working | [test_23](test_23_mid_conversation_system.py) |
 | Dynamic Workflows | ✅ | ❌ | ❌ | **Claude Code client feature, not an API feature**; "Bedrock support" means Claude Code using a Bedrock backend | — |
+| Fast Mode (`speed:"fast"`) | ✅ | ❌ | ❌ | research preview, Claude API only; Bedrock rejects the `speed` field | — |
+| Lower Prompt Cache Min (1024) | ✅ | ❌ | ❌ | Claude API only; Bedrock Opus 4.8 still measured at 4096 | — |
 
 **Summary**: 18 out of 29 features are natively supported on Bedrock. The remaining 11 can be implemented via a proxy layer — a reference implementation is available at [anthropic_api_converter](https://github.com/xiehust/anthropic_api_converter).
 
@@ -604,3 +606,46 @@ All orchestration, parallel scheduling, and script execution happen in the Claud
 **References**:
 - Claude Code docs: [https://docs.claude.com/en/docs/claude-code/workflows](https://docs.claude.com/en/docs/claude-code/workflows)
 - Announcement: [https://claude.com/blog/introducing-dynamic-workflows-in-claude-code](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code)
+
+
+---
+
+### Fast Mode (Opus 4.8) — not available on Bedrock
+
+Set top-level `speed: "fast"` (+ beta header `fast-mode-2026-02-01`) for up to 2.5x higher output tokens/sec from the same model, at premium pricing (Opus 4.8: $10/$50 per MTok).
+
+| Aspect | Details |
+|--------|---------|
+| **Anthropic** | Research preview, supports Opus 4.8/4.7/4.6, requires account-manager access. Response `usage.speed` returns `"fast"`/`"standard"` |
+| **Bedrock** | **Not supported.** Opus 4.8 with `speed:"fast"` (with or without the beta header) returns 400 `speed: Extra inputs are not permitted` |
+| **Difference** | Docs explicitly state "not available on third-party platforms, including Vertex AI, Amazon Bedrock, and Microsoft Foundry"; matches measurement |
+
+**Measured (2026-06-17, `global.anthropic.claude-opus-4-8`):**
+```
+speed:"fast" no beta header   → 400 speed: Extra inputs are not permitted
+speed:"fast" + fast-mode beta → 400 speed: Extra inputs are not permitted
+```
+
+**Reference**: [https://platform.claude.com/docs/en/build-with-claude/fast-mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)
+
+---
+
+### Lower Prompt Cache Min (Opus 4.8) — Bedrock still 4096
+
+Anthropic announced that Opus 4.8 lowers the minimum cacheable prompt length from 4,096 to **1,024 tokens**. This change is **Claude-API-only; Bedrock has not adopted it**.
+
+| Aspect | Details |
+|--------|---------|
+| **Anthropic** | Opus 4.8 minimum cacheable length = 1,024 tokens |
+| **Bedrock** | **Still 4,096 tokens (measured).** A prompt below ~4096 tokens with `cache_control` is not cached (`cache_creation_input_tokens=0`) |
+
+**Boundary scan (2026-06-17, `global.anthropic.claude-opus-4-8`):**
+
+| Prompt size | Cached |
+|-------------|:---:|
+| 4018 tokens | ❌ not cached |
+| 4135 tokens | ✅ cached |
+
+The boundary lands between 4018 and 4135 tokens — i.e., **4096**, matching the per-model cards. The advertised 1,024 minimum is not active on Bedrock. When designing prompt caching, cached content on Bedrock Opus 4.8 must still be ≥ 4096 tokens.
+
+> Contrast: Claude Fable 5 on Bedrock has a 1,024-token minimum (per its model card), while Opus 4.6/4.7/4.8 are all 4,096.

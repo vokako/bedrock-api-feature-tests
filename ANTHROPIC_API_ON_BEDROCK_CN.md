@@ -52,6 +52,8 @@
 | Claude 4.7 Changes | — | — | ✅ | 验证 Opus 4.7 breaking changes | [test_21](test_21_claude47_changes.py) |
 | Mid-conversation System Messages | ✅ | ❓ | ✅ | 仅 Opus 4.8；官方文档称 Bedrock 不支持，实测可用 | [test_23](test_23_mid_conversation_system.py) |
 | Dynamic Workflows | ✅ | ❌ | ❌ | **Claude Code 客户端特性，非 API**；"支持 Bedrock"指 Claude Code 接 Bedrock 后端可用 | — |
+| Fast Mode (`speed:"fast"`) | ✅ | ❌ | ❌ | research preview，仅 Claude API；Bedrock 拒绝 `speed` 字段 | — |
+| Lower Prompt Cache Min (1024) | ✅ | ❌ | ❌ | 仅 Claude API；Bedrock Opus 4.8 实测仍为 4096 | — |
 
 ---
 
@@ -806,3 +808,46 @@ Claude Code（客户端）
 **参考链接**：
 - Claude Code 文档: [https://docs.claude.com/en/docs/claude-code/workflows](https://docs.claude.com/en/docs/claude-code/workflows)
 - 公告: [https://claude.com/blog/introducing-dynamic-workflows-in-claude-code](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code)
+
+
+---
+
+### Fast Mode（Opus 4.8）—— Bedrock 不支持
+
+请求顶层设 `speed: "fast"`（+ beta header `fast-mode-2026-02-01`），同一模型输出速度最高 2.5×，溢价计费（Opus 4.8: $10/$50 per MTok）。
+
+| 维度 | 说明 |
+|------|------|
+| **Anthropic** | research preview，支持 Opus 4.8/4.7/4.6，需 account manager 申请 access。响应 `usage.speed` 返回 `"fast"`/`"standard"` |
+| **Bedrock** | **不支持**。实测 Opus 4.8 传 `speed:"fast"`（带/不带 beta header）均返回 400 `speed: Extra inputs are not permitted` |
+| **实现差异** | 官方文档明确 "not available on third-party platforms, including Vertex AI, Amazon Bedrock, and Microsoft Foundry"，实测一致 |
+
+**实测（2026-06-17，`global.anthropic.claude-opus-4-8`）：**
+```
+speed:"fast" 无 beta header    → 400 speed: Extra inputs are not permitted
+speed:"fast" + fast-mode beta  → 400 speed: Extra inputs are not permitted
+```
+
+**参考**：[https://platform.claude.com/docs/en/build-with-claude/fast-mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)
+
+---
+
+### Lower Prompt Cache Min（Opus 4.8）—— Bedrock 仍为 4096
+
+Anthropic 宣布 Opus 4.8 将最小可缓存提示长度从 4,096 降到 **1,024 tokens**。但该改动**仅在 Claude API 生效，Bedrock 未跟进**。
+
+| 维度 | 说明 |
+|------|------|
+| **Anthropic** | Opus 4.8 最小可缓存长度 1,024 tokens |
+| **Bedrock** | **实测仍为 4,096 tokens**。低于 ~4096 token 的 prompt 设 `cache_control` 也不会缓存（`cache_creation_input_tokens=0`） |
+
+**实测边界扫描（2026-06-17，`global.anthropic.claude-opus-4-8`）：**
+
+| prompt 大小 | 是否缓存 |
+|------------|:---:|
+| 4018 tokens | ❌ not cached |
+| 4135 tokens | ✅ cached |
+
+边界精确落在 4018↔4135 之间，即 **4096**——与各模型卡片标注的 4,096 一致，文档宣传的 1,024 在 Bedrock 上未生效。做 prompt caching 设计时，Bedrock 上 Opus 4.8 的缓存内容仍须 ≥ 4096 tokens。
+
+> 对比：Fable 5 在 Bedrock 上最小可缓存长度是 1,024（见模型卡片），Opus 4.6/4.7/4.8 均为 4,096。
