@@ -10,873 +10,557 @@
 
 ---
 
-本文档逐一梳理 Anthropic Messages API 的每个特性，说明其在 Amazon Bedrock 上的原生支持状态。对于 Bedrock 尚未内置的 Anthropic 特有特性，说明如何通过代理层或应用层自行实现。
+本文档逐一梳理 Anthropic Messages API 的每个特性在 Amazon Bedrock 上的原生支持状态，并说明各模型之间的行为差异。对于 Bedrock 尚未内置的 Anthropic 特有特性，给出通过代理层或应用层自行实现的方案。
+
+> 📌 **验证方式**：基于 Bedrock InvokeModel（runtime）与 Messages API（mantle）实测。所有标注 ✅ 的特性均有对应测试脚本（`test_01`–`test_23`）。
+> 📅 **最近一次全模型复核**：2026-07-03，覆盖 Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5。
+
+## 目录
+
+- [一、模型现状与跨模型差异](#一模型现状与跨模型差异)
+- [二、特性总览表](#二特性总览表)
+- [三、Bedrock 原生支持的特性](#三bedrock-原生支持的特性)
+- [四、需要代理层适配的特性](#四需要代理层适配的特性)
+- [五、Beta Header 在 Bedrock 上的处理](#五beta-header-在-bedrock-上的处理)
+- [六、Claude Code / Agent SDK 使用 Bedrock 的注意事项](#六claude-code--agent-sdk-使用-bedrock-的注意事项)
+- [七、Opus 4.8 新特性在 Bedrock 上的状态](#七opus-48-新特性在-bedrock-上的状态)
 
 ---
 
-> 📌 本文档基于 Bedrock InvokeModel API 实测验证。最近一次全模型复核：**2026-07-03**（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5）。所有标注 ✅ 的特性均有对应测试脚本。跨模型差异见下方「模型状态复核」。
+## 一、模型现状与跨模型差异
 
-## 总览
+### 当前 Bedrock 上的 Anthropic 现代模型
+
+| 模型 | Invoke（runtime）model ID | 说明 |
+|------|--------------------------|------|
+| Claude Sonnet 5 | `global.anthropic.claude-sonnet-5` | 2026-06-30 发布，最强 agentic Sonnet，1M 上下文 / 128k 输出 |
+| Claude Fable 5 | `global.anthropic.claude-fable-5` | Mythos 级，强制 `provider_data_share` 数据保留（见 [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md)） |
+| Claude Opus 4.8 | `global.anthropic.claude-opus-4-8` | drop-in 替换 4.7 |
+| Claude Opus 4.7 | `global.anthropic.claude-opus-4-7` | |
+| Claude Opus 4.6 | `global.anthropic.claude-opus-4-6-v1` | |
+| Claude Sonnet 4.6 | `global.anthropic.claude-sonnet-4-6` | |
+| Claude Haiku 4.5 | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | |
+
+### 跨模型行为矩阵（2026-07-03 全 runtime 实测）
+
+**关键结论：模型明显分成"新一代"（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）与"4.6 一代"（Opus 4.6 / Sonnet 4.6 / Haiku 4.5）两种行为。**
+
+| 特性 | Sonnet 5 | Fable 5 | Opus 4.8 | Opus 4.7 | Opus 4.6 | Sonnet 4.6 | Haiku 4.5 |
+|------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 基础调用 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Adaptive Thinking（`type:"adaptive"`+`effort`） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ 不支持 `effort` |
+| 旧版 Thinking（`type:"enabled"`+`budget_tokens`） | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
+| 采样参数 `temperature`/`top_p`/`top_k` | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
+| Structured Outputs（`output_config.format`） | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
+| Mid-conversation System Messages（`role:system`） | ✅ | ✅ | ✅ | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 |
+| Assistant Prefill | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| 最小可缓存长度（prompt cache min） | ~1,024 | ~1,024 | 4,096 | 4,096 | ~2,048\* | 2,048 | ~4,096 |
+
+\* Opus 4.6 未精确扫描，按同代 Sonnet 4.6 推断为 2,048，依赖前请自测。
+
+### 关键差异要点
+
+- **Thinking 一直可用，只是换了 API。** 新一代移除了旧版 `thinking.type:"enabled"` + `budget_tokens`（传了报 400），统一改用 **adaptive thinking**（`thinking.type:"adaptive"` + `output_config.effort`）。实测思考正常工作（Sonnet 5 / Opus 4.7 在难题上产出数千 thinking tokens）。adaptive 会自适应决定是否思考，简单问题可能不产 thinking block——这是设计如此，不是故障。迁移：把 `{"type":"enabled","budget_tokens":N}` 换成 `{"type":"adaptive"}` + `output_config:{"effort":"high"}`。
+- **采样参数在新一代被移除**：`temperature`/`top_p`/`top_k` 传非默认值一律 400。改用 prompt 引导行为。
+- **Structured Outputs 出现"代际反转"**：`output_config.format` 在 **4.6 一代（含 Haiku 4.5）可用**，但在**新一代全部 400**。做结构化输出须按模型分流——4.6 一代用 `output_config.format`，新一代改用 **forced tool use**（`tool_choice` 指定工具 + `input_schema`）。
+- **Mid-conversation system messages**：仅 **Opus 4.8 / Fable 5 / Sonnet 5** 接受并遵守 `messages` 内的 `role:system`（见[第七节](#七opus-48-新特性在-bedrock-上的状态)）。
+- **Prompt cache 最小长度差异大**：Sonnet 5 / Fable 5 低至 **1,024**；Sonnet 4.6 为 **2,048**；Opus 4.7 / 4.8 / Haiku 4.5 为 **4,096**。低于门槛即使设 `cache_control` 也不缓存（`cache_creation_input_tokens=0`）。注意新一代 tokenizer 更"膨胀"，同样文本 token 数比 4.6 一代高约 1.4–1.7×。
+- **Assistant Prefill**：Claude 4.6 起（含新一代）不再支持对话最后一条为 assistant 的预填充，发送返回 400 `This model does not support assistant message prefill`。仅 Haiku 4.5 仍支持。替代：用 [Structured Outputs](#structured-outputs) 或 system prompt 控制格式。
+
+### Opus 4.7 在 Bedrock 上的适配缺口（汇总）
+
+Opus 4.7 有多个特性 Bedrock 侧尚未适配（beta header 被接受但带真实参数会报错）。**Opus 4.8 已修复其中大部分**，如需这些特性建议用 4.8 或 4.6：
+
+| 特性 | Opus 4.7 表现 |
+|------|--------------|
+| Computer Use（bash/text_editor） | `tool type ... is not supported for this model` |
+| Context Editing（message ID） | `messages.0.id: Extra inputs are not permitted` |
+| Tool Search | `tool_search ... not supported for this model` |
+| Fine-grained Tool Streaming（`eager_input_streaming`） | `Extra inputs are not permitted` |
+| CountTokens | 仅 global 部署、无 in-region ID，不可用 |
+| Mid-conversation system messages | `role 'system' is not supported`（4.8 已支持） |
+
+### Fable 5 / Sonnet 5 备注
+
+- **Fable 5**：曾于 2026-06 从 Bedrock 短暂下线（runtime 5xx / mantle 404），后 "back on Amazon Bedrock with stronger guardrails" 重新上线，2026-07-03 复测 runtime + mantle 均恢复正常。是 Mythos 级模型，**必须开启 `provider_data_share` 数据保留**才能调用（账号级或 project 级），详见 [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md) 与 [test_22](test_22_fable5.py)。
+- **Sonnet 5**（2026-06-30）：最强 agentic Sonnet，1M 上下文 / 128k 输出，特性与 Sonnet 4.6 相同（除 Priority Tier），在 Bedrock 上行为归入"新一代"。
+
+---
+
+## 二、特性总览表
 
 | 特性 | Anthropic API | Bedrock Converse | Bedrock Invoke | 实现差异 | 验证 |
 |------|:---:|:---:|:---:|:---:|:---:|
 | Messages API 基础 | ✅ | ✅ | ✅ | 无 | [test_01](test_01_messages_basic.py) |
 | Streaming (SSE) | ✅ | ✅ | ✅ | 无 | [test_02](test_02_streaming.py) |
 | Tool Use | ✅ | ✅ | ✅ | 无 | [test_03](test_03_tool_use.py) |
-| Extended Thinking | ✅ | ✅ | ✅ | 无 | [test_04](test_04_extended_thinking.py) |
-| Adaptive Thinking | ✅ | ✅ | ✅ | 无 | [test_16](test_16_adaptive_thinking.py) |
+| Extended Thinking（旧版，仅 4.6 一代） | ✅ | ✅ | ✅ | 新一代已移除 | [test_04](test_04_extended_thinking.py) |
+| Adaptive Thinking | ✅ | ✅ | ✅ | Haiku 4.5 无 effort | [test_16](test_16_adaptive_thinking.py) |
 | Interleaved Thinking | ✅ | ✅ | ✅ | 无 | [test_05](test_05_interleaved_thinking.py) |
-| Prompt Caching | ✅ | ✅ | ✅ | 无 | [test_06](test_06_prompt_caching.py) |
+| Prompt Caching | ✅ | ✅ | ✅ | 最小长度按模型不同 | [test_06](test_06_prompt_caching.py) |
 | Vision | ✅ | ✅ | ✅ | 无 | [test_07](test_07_vision.py) |
 | PDF Support | ✅ | ✅ | ✅ | 无 | [test_08](test_08_pdf_support.py) |
 | Citations | ✅ | ✅ | ✅ | 无 | [test_09](test_09_citations.py) |
-| Structured Outputs | ✅ | ✅ | ✅ | 无 | [test_10](test_10_structured_outputs.py) |
-| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | 无 | [test_11](test_11_eager_input_streaming.py) |
+| Structured Outputs (`output_config.format`) | ✅ | ✅ | ✅ | **仅 4.6 一代**；新一代 400 | [test_10](test_10_structured_outputs.py) |
+| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | 仅 4.6 系列；Opus 4.7 不可用 | [test_11](test_11_eager_input_streaming.py) |
 | Compaction | ✅ | ✅ | ✅ | 无 | [test_12](test_12_compaction.py) |
-| Context Editing | ✅ | ✅ | ✅ | 无 | [test_13](test_13_context_editing.py) |
-| Tool Search | ✅ | ❌ | ✅ | 仅 Invoke API | [test_14](test_14_tool_search.py) |
+| Context Editing | ✅ | ✅ | ✅ | Opus 4.7 不可用 | [test_13](test_13_context_editing.py) |
+| Tool Search | ✅ | ❌ | ✅ | 仅 Invoke API；Opus 4.7 不可用 | [test_14](test_14_tool_search.py) |
 | Tool Input Examples | ✅ | ❌ | ✅ | 仅 Invoke API | [test_15](test_15_tool_input_examples.py) |
-| Web Search Tool | ✅ | ❌ | ❌ | 需自行实现 |
-| Web Fetch Tool | ✅ | ❌ | ❌ | 需自行实现 |
-| Code Execution Tool | ✅ | ❌ | ❌ | 需自行实现 |
-| Programmatic Tool Calling | ✅ | ❌ | ❌ | 需自行实现 |
-| Files API | ✅ | ❌ | ❌ | 需自行实现 |
-| Batch Processing | ✅ | ❌ | ❌ | 需自行实现 |
-| Token Counting | ✅ | ❌ | ❌ | Bedrock CountTokens API | |
-| MCP Connector | ✅ | ❌ | ❌ | 需自行实现 |
-| Memory Tool | ✅ | ❌ | ❌ | 需自行实现 |
-| Bash Tool | ✅ | ✅ | ✅ | 无 | [test_17](test_17_bash_tool.py) |
-| Text Editor Tool | ✅ | ✅ | ✅ | name 映射 | [test_18](test_18_text_editor_tool.py) |
-| Computer Use Tool | ✅ | ❌ | ❌ | 需自行实现 |
-| Agent Skills | ✅ | ❌ | ❌ | 需自行实现 |
-| Claude 4.7 Changes | — | — | ✅ | 验证 Opus 4.7 breaking changes | [test_21](test_21_claude47_changes.py) |
-| Mid-conversation System Messages | ✅ | ❓ | ✅ | 仅 Opus 4.8；官方文档称 Bedrock 不支持，实测可用 | [test_23](test_23_mid_conversation_system.py) |
-| Dynamic Workflows | ✅ | ❌ | ❌ | **Claude Code 客户端特性，非 API**；"支持 Bedrock"指 Claude Code 接 Bedrock 后端可用 | — |
-| Fast Mode (`speed:"fast"`) | ✅ | ❌ | ❌ | research preview，仅 Claude API；Bedrock 拒绝 `speed` 字段 | — |
-| Lower Prompt Cache Min (1024) | ✅ | ❌ | ❌ | 仅 Claude API；Bedrock Opus 4.8 实测仍为 4096 | — |
+| Bash Tool | ✅ | ✅ | ✅ | Opus 4.7 不可用 | [test_17](test_17_bash_tool.py) |
+| Text Editor Tool | ✅ | ✅ | ✅ | name 映射；Opus 4.7 不可用 | [test_18](test_18_text_editor_tool.py) |
+| Claude 4.7 变更验证 | — | — | ✅ | breaking changes | [test_21](test_21_claude47_changes.py) |
+| Claude Fable 5 兼容性 | ✅ | — | ✅ | 需 `provider_data_share` | [test_22](test_22_fable5.py) |
+| Mid-conversation System Messages | ✅ | ❓ | ✅ | 仅新一代 4.8/Fable5/Sonnet5；文档称不支持但实测可用 | [test_23](test_23_mid_conversation_system.py) |
+| Token Counting | ✅ | ❌ | ❌ | Bedrock 原生 CountTokens API（仅 in-region ID） | [test_20](test_20_count_tokens.py) |
+| Web Search Tool | ✅ | ❌ | ❌ | 需自行实现 | — |
+| Web Fetch Tool | ✅ | ❌ | ❌ | 需自行实现 | — |
+| Code Execution Tool | ✅ | ❌ | ❌ | 需自行实现 | — |
+| Programmatic Tool Calling | ✅ | ❌ | ❌ | 需自行实现 | — |
+| Files API | ✅ | ❌ | ❌ | 需自行实现 | — |
+| Batch Processing | ✅ | ❌ | ❌ | Bedrock 有独立接口 | — |
+| MCP Connector | ✅ | ❌ | ❌ | 需自行实现 | — |
+| Memory Tool | ✅ | ❌ | ❌ | 需自行实现 | — |
+| Computer Use Tool | ✅ | ❌ | ❌ | 需自行实现 | — |
+| Agent Skills | ✅ | ❌ | ❌ | 需自行实现 | — |
+| Dynamic Workflows | ✅ | ❌ | ❌ | Claude Code 客户端特性，非 API | — |
+| Fast Mode (`speed:"fast"`) | ✅ | ❌ | ❌ | 仅 Claude API | — |
 
 ---
 
-## 模型状态复核（2026-07-03，全 runtime `global.` 前缀实测）
+## 三、Bedrock 原生支持的特性
 
-覆盖当前 Bedrock 上的现代模型。**结论：模型明显分成"新一代"（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）和"4.6 一代"（Opus 4.6 / Sonnet 4.6 / Haiku 4.5）两种行为**。
+以下特性 Bedrock 完整支持。InvokeModel API 与 Anthropic Messages API 格式基本等价（请求/响应结构相同，仅需添加 `anthropic_version` 字段和调整认证方式），无需格式转换；Converse API 则需要 Anthropic ↔ Bedrock 格式转换。
 
-| 特性 | Sonnet 5 | Fable 5 | Opus 4.8 | Opus 4.7 | Opus 4.6 | Sonnet 4.6 | Haiku 4.5 |
-|------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| 基础调用 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `thinking.type:"enabled"`（+budget_tokens） | ❌400 | ❌400 | ❌400 | ❌400 | ✅ | ✅ | ✅ |
-| 采样参数 `temperature`/`top_p`/`top_k` | ❌400 | ❌400 | ❌400 | ❌400 | ✅ | ✅ | ✅ |
-| Adaptive Thinking + `output_config.effort` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌（不支持 effort 字段） |
-| **Structured Outputs（`output_config.format`）** | ❌400 | ❌400 | ❌400 | ❌400 | ✅ | ✅ | ✅ |
-| **Mid-conversation System Messages（messages 内 `role:system`）** | ✅遵守 | ✅遵守 | ✅遵守 | ❌400 | ❌400 | ❌400 | ❌400 |
-| **最小可缓存长度（prompt cache min）** | ~1,024 | ~1,024 | 4,096 | 4,096 | ~2,048* | 2,048 | ~4,096 |
-
-\* Opus 4.6 未精确扫描，按 Sonnet 4.6 同代推断为 2,048，依赖前请自测。
-
-### 要点
-
-- **Thinking 仍然支持，只是换了 API**：新一代（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）移除了旧版 `thinking.type:"enabled"` + `budget_tokens`（传了报 400），改用 **adaptive thinking**（`thinking.type:"adaptive"` + `output_config.effort`），实测思考正常工作（如 Sonnet 5 / Opus 4.7 在难题上产出数千 thinking tokens）。矩阵中 `type:"enabled"` 那行的 ❌400 指的是旧写法，不代表 thinking 不可用。adaptive 会自适应决定是否思考（简单问题可能不产 thinking block）。
-- **新一代（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）统一行为**：只支持 adaptive thinking（`type:"enabled"` 和采样参数一律 400）；**不支持** `output_config.format`（结构化输出改用 forced tool use）。
-- **Mid-conversation system messages**：仅 **Opus 4.8 / Fable 5 / Sonnet 5** 接受并遵守（messages 里塞 `role:system`）；Opus 4.7 报 `role 'system' is not supported`；4.6 一代报 `Unexpected role "system"`。官方文档称 Bedrock 不支持，但实测这三个模型可用。详见 [test_23](test_23_mid_conversation_system.py)。
-- **Structured Outputs 反向变化**：`output_config.format` 在 **4.6 一代（含 Haiku 4.5）可用**，但在**新一代全部 400**。做结构化输出时须按模型分流：4.6 用 `output_config.format`，新一代用 forced tool use。
-- **Prompt cache 最小长度差异大**：Sonnet 5 / Fable 5 低至 **1,024**；Sonnet 4.6 为 **2,048**；Opus 4.7 / 4.8 / Haiku 4.5 为 **4,096**。设计缓存时按模型区分，否则短 prompt 在高门槛模型上不会被缓存（`cache_creation_input_tokens=0`）。注意新一代 tokenizer 更"膨胀"，同样文本 token 数比 4.6 一代高约 1.4–1.7×。
-- **Haiku 4.5**：不接受 `output_config.effort` 字段（其余特性正常）。
-- **Fable 5**：曾于 2026-06 从 Bedrock 短暂下线（runtime 5xx / mantle 404），后"back on Amazon Bedrock with stronger guardrails"重新上线，2026-07-03 复测 runtime + mantle 均恢复正常。详见 [test_22](test_22_fable5.py) 与 [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md)。
-- **Sonnet 5**（2026-06-30 发布）：最强 agentic Sonnet，1M 上下文 / 128k 输出，特性与 Sonnet 4.6 相同（除 Priority Tier）。在 Bedrock 上行为归入"新一代"（见上表）。
-
----
-
-## Bedrock 原生支持的特性
-
-以下特性 Bedrock 完整支持。其中 Bedrock InvokeModel API 与 Anthropic API 格式基本等价（请求/响应结构相同，仅需添加 `anthropic_version` 字段和调整认证方式），无需做格式转换；Converse API 则需要做 Anthropic ↔ Bedrock 格式转换。
+> 📌 模型间的 breaking changes（Thinking / 采样参数 / prefill / Structured Outputs 等）统一见[第一节的跨模型矩阵](#跨模型行为矩阵2026-07-03-全-runtime-实测)，本节不再逐条重复。
 
 ### Messages API 基础
 
-Claude 的核心对话接口，支持多轮对话、system prompt、assistant prefill。所有与 Claude 的交互都通过此 API 进行。
+Claude 的核心对话接口，支持多轮对话、system prompt。所有与 Claude 的交互都通过此 API 进行。
 
-- **Anthropic**: [https://docs.anthropic.com/en/api/messages](https://docs.anthropic.com/en/api/messages)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html)
-- InvokeModel API 与 Anthropic API 格式基本等价，直接透传即可。Converse API 提供统一接口但格式不同，需做转换。
-
-> ⚠️ **Breaking Change (Claude 4.6)**：Opus 4.6 和 Sonnet 4.6 **不再支持 assistant message prefill**（即对话最后一条消息为 assistant 角色的预填充）。发送 prefill 请求会返回 400 错误：`"This model does not support assistant message prefill"`。Anthropic 官方文档仅标注 Opus 4.6 不支持 prefill，但 Bedrock 实测 Sonnet 4.6 同样不支持。替代方案：使用 [Structured Outputs](#structured-outputs) 或 system prompt 来控制输出格式。
-
-> ⚠️ **Breaking Changes (Claude Opus 4.7)**：Opus 4.7 在 4.6 基础上新增以下 breaking changes（已通过 [test_21](test_21_claude47_changes.py) 验证）：
-> - **Extended thinking 移除**：`thinking: {type: "enabled", budget_tokens: N}` 返回 400 错误。必须迁移到 `thinking: {type: "adaptive"}` + `output_config.effort`。
-> - **Sampling 参数移除**：`temperature`、`top_p`、`top_k` 设置非默认值返回 400 错误。必须从请求中移除这些参数。
-> - **Prefill 移除**：同 4.6，assistant message prefill 返回 400 错误。
-> - **Thinking 内容默认隐藏**：thinking block 仍出现在响应中，但 `thinking` 字段默认为空。需设置 `thinking.display: "summarized"` 才能获取 thinking 内容。
-> - **新 tokenizer**：同样文本可能产生约 1x-1.35x 的 token 数量（最多增加 ~35%）。
-> - **新增 `xhigh` effort 级别**：推荐用于编码和 agentic 场景。
-> - **128k max_tokens GA**：无需 beta header 即可设置 `max_tokens=128000`。
-> - **Task budgets (beta)**：通过 `task-budgets-2026-03-13` beta header 启用，在 `output_config` 中设置 `task_budget`，让模型感知 token 预算并自行调配。
-> - **高分辨率图像支持**：最大分辨率从 1568px 提升到 2576px（长边），图像 token 最多增加约 3x。
+- **Anthropic**: [messages](https://docs.anthropic.com/en/api/messages)
+- **Bedrock**: [model-parameters-anthropic-claude-messages](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html)
+- InvokeModel API 与 Anthropic API 格式基本等价，直接透传即可；Converse API 需做转换。
 
 ### Streaming (SSE)
 
-服务端推送事件流，实现逐 token 输出。适用于需要实时展示生成过程的交互式应用（聊天、代码生成等）。
+服务端推送事件流，逐 token 输出。适用于聊天、代码生成等交互式场景。
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/streaming](https://docs.anthropic.com/en/build-with-claude/streaming)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModelWithResponseStream.html) / ConverseStream
-- InvokeModelWithResponseStream 返回的 SSE 事件格式与 Anthropic 一致。ConverseStream 使用 Bedrock 自有格式，需转换。
+- **Anthropic**: [streaming](https://docs.anthropic.com/en/build-with-claude/streaming)
+- **Bedrock**: `InvokeModelWithResponseStream` 的 SSE 事件格式与 Anthropic 一致；ConverseStream 使用 Bedrock 自有格式需转换。
 
 ### Tool Use（函数调用）
 
-让 Claude 调用外部工具/函数，如查询数据库、调用 API、执行计算等。是构建 Agent 的核心能力。
+让 Claude 调用外部工具/函数，是构建 Agent 的核心能力。
 
-- **Anthropic**: [https://docs.anthropic.com/en/agents-and-tools/tool-use/overview](https://docs.anthropic.com/en/agents-and-tools/tool-use/overview)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages-tool-use.html)
-- InvokeModel API 下工具定义格式与 Anthropic 一致。Converse API 下工具 schema 格式不同，需做转换。
+- **Anthropic**: [tool-use/overview](https://docs.anthropic.com/en/agents-and-tools/tool-use/overview)
+- **Bedrock**: InvokeModel 下工具定义格式与 Anthropic 一致；Converse 下 schema 格式不同需转换。
+- **结构化输出**：新一代模型（Sonnet 5/Fable 5/Opus 4.8/4.7）不支持 `output_config.format`，用 **forced tool use**（`tool_choice` 强制某工具 + `input_schema` 定义结构）替代。
 
-### Extended Thinking
+### Adaptive Thinking（推荐）
 
-让 Claude 在回答前进行深度推理，输出 thinking block。适用于数学、逻辑推理、复杂代码等需要多步思考的任务。
+Claude 动态决定是否思考及思考深度，无需手动设 `budget_tokens`。**新一代模型唯一的 thinking 方式。**
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/extended-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-extended-thinking.html)
-- Converse 和 Invoke API 均支持 `thinking` 参数。
+- **Anthropic**: [adaptive-thinking](https://docs.anthropic.com/en/build-with-claude/adaptive-thinking)
+- **Bedrock**: [claude-messages-adaptive-thinking](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html)
+- `thinking: {type: "adaptive"}` — 无需 beta header，自动启用 interleaved thinking，配合 `output_config.effort`（`low`/`medium`/`high`/`xhigh`/`max`）控制思考程度。
+- 新一代默认关闭 thinking（不设 `thinking` 字段时不思考），需显式 `thinking:{type:"adaptive"}`；thinking 内容默认隐藏（`display:"omitted"`），设 `display:"summarized"` 才返回可见 thinking 文本。
+- **Haiku 4.5** 不接受 `output_config.effort` 字段（其余正常）。
 
-> ⚠️ **Deprecated (Claude 4.6)**：`thinking: {type: "enabled", budget_tokens: N}` 在 Opus 4.6 和 Sonnet 4.6 上已被标记为 deprecated。Bedrock 实测仍可正常使用，但未来版本将移除。建议迁移到 [Adaptive Thinking](#adaptive-thinking) (`thinking: {type: "adaptive"}`) + [effort 参数](#adaptive-thinking)。
+### Extended Thinking（旧版，仅 4.6 一代）
 
-> 🚫 **Removed (Claude Opus 4.7)**：`thinking: {type: "enabled", budget_tokens: N}` 在 Opus 4.7 上返回 400 错误。**必须**迁移到 [Adaptive Thinking](#adaptive-thinking)。
+`thinking: {type: "enabled", budget_tokens: N}` 手动设定思考预算。**仅 Opus 4.6 / Sonnet 4.6 / Haiku 4.5 可用**，新一代已移除（返回 400），须迁移到 Adaptive Thinking。
 
-### Adaptive Thinking
-
-Claude 动态决定是否思考及思考深度，无需手动设置 `budget_tokens`。适用于任务复杂度不均匀的场景（如 agentic workflow 中简单和复杂步骤交替出现）。
-
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/adaptive-thinking](https://docs.anthropic.com/en/build-with-claude/adaptive-thinking)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-adaptive-thinking.html)
-- `thinking: {type: "adaptive"}` — 无需 beta header。仅 Opus 4.6 / Sonnet 4.6 支持。自动启用 interleaved thinking。可配合 `output_config.effort`（`max`/`high`/`medium`/`low`）控制思考程度。
-- Opus 4.6 新增 `max` effort 级别，提供最高能力。Sonnet 4.6 首次引入 effort 参数到 Sonnet 系列，建议大多数场景使用 `medium` 以平衡速度、成本和性能。
-- **Opus 4.7 新增**：`xhigh` effort 级别（推荐用于编码和 agentic 场景）。Opus 4.7 上 adaptive thinking **默认关闭**（不设置 `thinking` 字段时不产生 thinking），需显式设置 `thinking: {type: "adaptive"}` 启用。Thinking 内容默认隐藏（`display: "omitted"`），需设置 `display: "summarized"` 才能在响应中看到 thinking 文本。
+- **Anthropic**: [extended-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking)
 
 ### Interleaved Thinking
 
-在工具调用之间穿插思考过程。适用于多步工具调用的 Agent 场景，让 Claude 在每次工具返回后重新思考下一步。
+在工具调用之间穿插思考。Adaptive thinking 模式下自动启用；手动 extended thinking 模式下通过 `interleaved-thinking-2025-05-14` beta header 启用（Opus 4.6 已 deprecated，Sonnet 4.6 仍支持）。
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking)
-- **Bedrock**: Beta header `interleaved-thinking-2025-05-14` 直接透传。
-- 在手动 extended thinking 模式（`thinking.type: "enabled"`）下通过 beta header 启用。Adaptive thinking 模式下自动启用，无需此 header。
-
-> ⚠️ **Deprecated (Claude 4.6)**：`interleaved-thinking-2025-05-14` beta header 在 Opus 4.6 上已 deprecated（安全忽略，不再需要）。Sonnet 4.6 上仍支持用于手动 extended thinking 模式。建议迁移到 adaptive thinking。
+- **Anthropic**: [extended-thinking#interleaved-thinking](https://docs.anthropic.com/en/build-with-claude/extended-thinking#interleaved-thinking)
 
 ### Prompt Caching
 
-缓存重复使用的 system prompt、工具定义等，避免重复计算 token。适用于多轮对话、长 system prompt、频繁调用相同工具集的场景，可显著降低延迟和成本。
+缓存重复使用的 system prompt、工具定义等。**最小可缓存长度按模型不同**（见[第一节矩阵](#跨模型行为矩阵2026-07-03-全-runtime-实测)）。
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)
-- **Bedrock**: InvokeModel API 下 `cache_control` 格式与 Anthropic 一致；Converse API 通过 `cachePoint` 机制支持，需做转换。TTL 支持 5m 和 1h。
+- **Anthropic**: [prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)
+- **Bedrock**: InvokeModel 下 `cache_control` 格式与 Anthropic 一致；Converse 通过 `cachePoint` 支持。TTL 支持 5m 和 1h。
 
-> ⚠️ **Bedrock 不支持 Automatic Caching**：Anthropic 新增的顶层 `cache_control` 自动缓存功能（在请求体顶层设置 `"cache_control": {"type": "ephemeral"}`，系统自动将缓存断点应用到最后一个可缓存的 block）在 Bedrock 上不可用，所有模型均返回 `cache_control: Extra inputs are not permitted`。Anthropic 文档明确标注 Bedrock 支持"coming later"。目前 Bedrock 仅支持 **explicit cache breakpoints**（在单个 content block 上设置 `cache_control`）。
+> ⚠️ **Bedrock 不支持顶层 Automatic Caching**：Anthropic 的顶层 `cache_control`（自动选最后一个可缓存 block）在 Bedrock 上报 `cache_control: Extra inputs are not permitted`，官方标注 "coming later"。Bedrock 目前仅支持 **explicit cache breakpoints**（在单个 content block 上设 `cache_control`）。
 
-**Automatic Caching 的 Workaround**：当代理层收到带有顶层 `cache_control` 的请求时，转换为显式断点：
+**Automatic Caching 的 Workaround**：代理层收到顶层 `cache_control` 时转换为显式断点——移除顶层字段，在最后一个可缓存 block（`system`/`messages`/`tools` 的最后一个）上加 `cache_control:{"type":"ephemeral"}`（InvokeModel）或追加 `cachePoint:{"type":"default"}`（Converse）。Converse API 还支持 **Simplified Cache Management**：在静态内容末尾放一个 `cachePoint`，系统自动回溯约 20 个 block 匹配最长前缀。
 
-1. 移除请求体顶层的 `cache_control`
-2. 找到请求中最后一个可缓存的 content block（`system` 的最后一个 block、`messages` 的最后一条消息、或 `tools` 的最后一个工具）
-3. 在该 block 上添加 `cache_control: {"type": "ephemeral"}`（InvokeModel API）或在其后追加 `cachePoint: {"type": "default"}`（Converse API）
-4. 效果等同于 Anthropic 的自动模式 — 该点之前的最长前缀会被缓存
+```jsonc
+// Converse API
+"messages": [{"role":"user","content":[
+    {"text":"长静态内容..."},
+    {"cachePoint":{"type":"default"}}
+]}]
 
-对于 Converse API，Bedrock 还支持 **Simplified Cache Management**：只需在静态内容末尾放一个 `cachePoint`，系统会自动往回查找最多约 20 个 content block 来匹配最长的缓存前缀。无需精确放置多个 checkpoint。
-
-```
-// Converse API — 在静态内容末尾放一个 cachePoint
-"messages": [
-    {"role": "user", "content": [
-        {"text": "长静态内容..."},
-        {"cachePoint": {"type": "default"}}   // ← 系统自动查找最佳缓存匹配
-    ]}
-]
-
-// InvokeModel API — 在最后一个静态 block 上设置 cache_control
-"messages": [
-    {"role": "user", "content": [
-        {"type": "text", "text": "长静态内容...", "cache_control": {"type": "ephemeral"}}
-    ]}
-]
+// InvokeModel API
+"messages": [{"role":"user","content":[
+    {"type":"text","text":"长静态内容...","cache_control":{"type":"ephemeral"}}
+]}]
 ```
 
 ### Vision（多模态）
 
-让 Claude 理解和分析图像内容。适用于图表解读、OCR、UI 截图分析、图像描述等场景。
+理解和分析图像。适用于图表解读、OCR、UI 截图分析等。
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/vision](https://docs.anthropic.com/en/build-with-claude/vision)
-- **Bedrock**: 支持 base64 编码图像输入（JPEG, PNG, GIF, WebP）。
+- **Anthropic**: [vision](https://docs.anthropic.com/en/build-with-claude/vision)
+- **Bedrock**: 支持 base64 图像输入（JPEG/PNG/GIF/WebP）。
 
 ### PDF Support
 
-直接传入 PDF 文档让 Claude 阅读和分析。适用于文档摘要、合同审查、论文分析等场景，无需预处理提取文本。
+直接传入 PDF 让 Claude 阅读分析。
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/pdf-support](https://docs.anthropic.com/en/build-with-claude/pdf-support)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-runtime_example_bedrock-runtime_DocumentUnderstanding_AnthropicClaude_section.html](https://docs.aws.amazon.com/bedrock/latest/userguide/bedrock-runtime_example_bedrock-runtime_DocumentUnderstanding_AnthropicClaude_section.html) — 支持 document content block。
+- **Anthropic**: [pdf-support](https://docs.anthropic.com/en/build-with-claude/pdf-support)
+- **Bedrock**: 支持 document content block。
 
 ### Citations
 
-Claude 在回答中引用来源文档的具体位置。适用于需要溯源验证的场景（RAG、文档问答、研究报告）。
+Claude 在回答中引用来源文档的具体位置，适用于 RAG、文档问答。
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/citations](https://docs.anthropic.com/en/build-with-claude/citations)
-- **Bedrock**: Converse API 支持。
+- **Anthropic**: [citations](https://docs.anthropic.com/en/build-with-claude/citations)
+- **Bedrock**: InvokeModel（document block 上设 `citations:{enabled:true}`）和 Converse 均支持。
 
 ### Structured Outputs
 
-强制 Claude 输出符合指定 JSON Schema 的结构化数据。适用于数据提取、表单填充、API 响应生成等需要严格格式的场景。
+强制输出符合 JSON Schema 的结构化数据。
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/structured-outputs](https://docs.anthropic.com/en/build-with-claude/structured-outputs)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html)
+- **Anthropic**: [structured-outputs](https://docs.anthropic.com/en/build-with-claude/structured-outputs)
+- **Bedrock**: [claude-messages-structured-outputs](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html)
 
-> ⚠️ **Breaking Change (Bedrock)**：`output_format` 参数在 Bedrock 上已**全面不可用**（所有模型均返回 400 错误，提示使用 `output_config.format`），包括 Sonnet 4.5、Haiku 4.5 等旧模型。这是 Bedrock 平台级别的变更，与模型版本无关。必须迁移到新语法：
-> ```json
-> // ❌ 旧语法（Bedrock 上所有模型均报错）
-> "output_format": {"type": "json_schema", ...}
-> // ✅ 新语法
-> "output_config": {"format": {"type": "json_schema", "schema": {..., "additionalProperties": false}}}
-> ```
-> 注意：`schema` 中所有 `object` 类型必须显式设置 `"additionalProperties": false`。
->
-> 另外支持 `strict: true` 工具调用（在工具定义中设置 `"strict": true`），保证工具参数严格符合 schema。已验证 Sonnet 4.5、Haiku 4.5、Sonnet 4.6、Opus 4.6 均支持。
+> ⚠️ **两个要点**：
+> 1. 旧参数 `output_format` 在 Bedrock 上**全平台不可用**（所有模型 400，提示改用 `output_config.format`）。新语法：`"output_config":{"format":{"type":"json_schema","schema":{..., "additionalProperties":false}}}`，所有 `object` 必须显式 `"additionalProperties":false`。
+> 2. **`output_config.format` 仅 4.6 一代可用**（Opus 4.6 / Sonnet 4.6 / Haiku 4.5）；**新一代（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）全部返回 400**，须改用 forced tool use（`strict:true` 工具，4.6 一代已验证支持）。
 
 ### Fine-grained Tool Streaming
 
-流式传输工具调用参数，跳过 JSON 缓冲验证，降低工具调用的首 chunk 延迟。适用于需要快速展示工具调用权限提示的交互式应用（如 Claude Code）。
+流式传输工具调用参数，降低工具调用首 chunk 延迟（Bedrock 默认缓冲整块 tool_use JSON，导致 10-20s 延迟，启用后降至 1-3s）。
 
-- **Anthropic**: [https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming](https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming)
-- **Bedrock**: 全平台支持（GA，无需 beta header）
-- 启用方式：在工具定义中设置 `"eager_input_streaming": true`。注意可能收到不完整的 JSON，需客户端处理。
-- **实际影响**：Bedrock 默认缓冲整个 tool_use JSON 块，导致工具调用延迟 10-20 秒。启用后降至 1-3 秒。详见 [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
-
-> ⚠️ **模型兼容性注意**：`eager_input_streaming` 字段仅 Claude 4.6 系列（Opus 4.6 / Sonnet 4.6）支持。在 Sonnet 4.5 及更早模型上，该字段会导致 400 错误（`Extra inputs are not permitted`），即使同时传递 `fine-grained-tool-streaming-2025-05-14` beta header 也无法解决。但实测 Sonnet 4.5 本身已默认以细粒度方式流式返回 tool input JSON delta（20+ chunks），无需额外参数。因此代理层应根据模型版本判断是否注入此字段。
-
-> ⚠️ **Opus 4.7 不可用**：Bedrock 上 Opus 4.7 同样不支持 `eager_input_streaming` 字段（返回 `Extra inputs are not permitted`），无论有无 beta header。这是 Bedrock 侧尚未适配的问题。
+- **Anthropic**: [fine-grained-tool-streaming](https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming)
+- **Bedrock**: 全平台 GA，无需 beta header。在工具定义中设 `"eager_input_streaming": true`。
+- **模型兼容性**：`eager_input_streaming` 仅 Claude 4.6 系列支持；Sonnet 4.5 及更早、Opus 4.7 上会 400（`Extra inputs are not permitted`）。Sonnet 4.5 本身已默认细粒度流式返回，无需该字段。代理层应按模型版本决定是否注入。
 
 ### Compaction
 
-自动压缩对话历史以适应上下文窗口。适用于长对话或 Agent 循环中上下文逐渐膨胀的场景，避免超出 context window 限制。
+自动压缩对话历史以适应上下文窗口。
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/compaction](https://docs.anthropic.com/en/build-with-claude/compaction)
-- **Bedrock**: [https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-compaction.html](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-compaction.html)
-- Beta header `compact-2026-01-12` 直接透传。
+- **Anthropic**: [compaction](https://docs.anthropic.com/en/build-with-claude/compaction)
+- **Bedrock**: beta header `compact-2026-01-12` 直接透传。
 
 ### Context Editing
 
-编辑对话上下文中的特定消息，无需重新发送整个对话历史。适用于需要修正或更新历史消息的场景。
+编辑上下文中的特定消息，无需重发整个历史。
 
-- **Anthropic**: [https://docs.anthropic.com/en/build-with-claude/context-editing](https://docs.anthropic.com/en/build-with-claude/context-editing)
-- **Bedrock**: Beta header `context-management-2025-06-27` 直接透传。
+- **Anthropic**: [context-editing](https://docs.anthropic.com/en/build-with-claude/context-editing)
+- **Bedrock**: beta header `context-management-2025-06-27` 直接透传。**Opus 4.7 不可用**（message ID 字段报 400）。
 
-> ⚠️ **Opus 4.7 不可用**：Bedrock 上 Opus 4.7 不支持 message ID 字段（`messages.0.id: Extra inputs are not permitted`）。Context Editing 功能在 Opus 4.7 上暂不可用，Bedrock 侧尚未适配。
+### Bash Tool / Text Editor Tool
+
+让 Claude 直接执行 bash 命令、编辑文件（客户端工具，模型生成 `tool_use`，客户端执行）。
+
+- **Anthropic**: [bash-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/bash-tool) / [text-editor-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/text-editor-tool)
+- **Bedrock**: InvokeModel 和 Converse 均支持，需 `computer-use-2025-01-24` beta header。
+- **name 差异**：Bedrock 上 text editor 的 name 必须为 `str_replace_based_edit_tool`，type 为 `text_editor_20250728`。
+- **Opus 4.7 不可用**：`bash_20250124` / `text_editor_20250728` 均报 `not supported for this model`（Opus 4.6 正常）。
 
 ---
 
-## 需要适配的特性
+## 四、需要代理层适配的特性
 
+以下特性 Bedrock 无原生支持，需通过代理层（如 [anthropic_api_converter](https://github.com/xiehust/anthropic_api_converter)）实现。
 
 ### 1. Tool Search Tool
 
-让 Claude 从大量工具（最多 10,000 个）中动态发现和加载所需工具，而非一次性加载所有工具定义。适用于 MCP 多服务器集成、大型工具库等工具数量超过 30-50 个导致选择准确率下降的场景。
+从大量工具（最多 10,000 个）中动态发现和加载所需工具。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | `tool_search_tool_regex_20251119` / `tool_search_tool_bm25_20251119`。Server-side tool，Claude 动态发现和加载工具（最多 10,000 个），每次返回 3-5 个最相关工具。支持模型：Sonnet 4.0+, Opus 4.0+（不支持 Haiku） |
-| **Bedrock** | **Converse API 不支持**。仅 InvokeModel API 支持，需传递 `tool-search-tool-2025-10-19` beta header |
-| **实现差异** | 使用 Converse API 时需切换到 InvokeModel API |
+| **Anthropic** | `tool_search_tool_regex_20251119` / `tool_search_tool_bm25_20251119`，server-side，每次返回 3-5 个最相关工具（Sonnet 4.0+/Opus 4.0+，不支持 Haiku） |
+| **Bedrock** | Converse 不支持；仅 InvokeModel 支持，需 `tool-search-tool-2025-10-19` beta header。**Opus 4.7 不可用**（`not supported for this model`） |
 
-> ⚠️ **Opus 4.7 不可用**：Bedrock 上 Opus 4.7 的 `tool_search_tool_regex_20251119` 工具类型返回 `not supported for this model`。Bedrock 侧尚未适配。Opus 4.6 / Sonnet 4.6 正常。
+**方案**：检测 tool search 工具时，映射 Anthropic `advanced-tool-use-2025-11-20` → Bedrock `tool-search-tool-2025-10-19`，并自动从 Converse 切换到 InvokeModel API。
 
-**Implementation Solution**：
+- Anthropic: [tool-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool)
+- 参考实现: [config.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py) / [anthropic_to_bedrock.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/converters/anthropic_to_bedrock.py) / [bedrock_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/bedrock_service.py)
 
-- 检测到请求中包含 tool search 工具时，将 Anthropic beta header `advanced-tool-use-2025-11-20` 映射为 Bedrock 的 `tool-search-tool-2025-10-19`
-- 自动从 Converse API 切换到 InvokeModel API
-- 仅对支持的模型生效（配置在 `beta_header_supported_models` 中）
+### 2. Tool Input Examples (`input_examples`)
 
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/tool-search-tool)
-- Bedrock: [https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-anthropic-claude-messages.html)（通过 InvokeModel）
-- Workaround 参考实现:
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py) — `beta_header_mapping` / `beta_headers_requiring_invoke_model`
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/converters/anthropic_to_bedrock.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/converters/anthropic_to_bedrock.py) — `_map_beta_headers()` / `_supports_beta_header_mapping()`
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/bedrock_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/bedrock_service.py) — `invoke_model()` 方法，Claude 模型自动使用 InvokeModel API
-
----
-
-### 2. Tool Input Examples (input_examples)
-
-为工具定义提供示例输入，帮助 Claude 更好地理解工具的使用方式和参数格式。适用于工具参数复杂或模型经常传错参数的场景。
+为工具提供示例输入，帮助模型理解参数格式。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | 工具定义中的 `input_examples` 字段，为工具提供示例输入。Beta header: `advanced-tool-use-2025-11-20` |
-| **Bedrock** | **Converse API 不支持**。仅 InvokeModel API 支持，需传递 `tool-examples-2025-10-29` beta header |
-| **实现差异** | 与 Tool Search 相同，需使用 InvokeModel API |
+| **Anthropic** | 工具定义中的 `input_examples` 字段，beta header `advanced-tool-use-2025-11-20` |
+| **Bedrock** | Converse 不支持；仅 InvokeModel，需 `tool-examples-2025-10-29` beta header |
 
-**Implementation Solution**：
+**方案**：同 Tool Search，映射 `advanced-tool-use-2025-11-20` → `tool-examples-2025-10-29`，切换到 InvokeModel。
 
-- 同 Tool Search — 映射 `advanced-tool-use-2025-11-20` → `tool-examples-2025-10-29`
-- 自动切换到 InvokeModel API
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/implement-tool-use#providing-tool-use-examples](https://docs.anthropic.com/en/agents-and-tools/tool-use/implement-tool-use#providing-tool-use-examples)
-- Bedrock: 同上（InvokeModel API）
-- Workaround 参考实现: 同 Tool Search（共用同一套 beta header 映射机制）
-
----
+- Anthropic: [providing-tool-use-examples](https://docs.anthropic.com/en/agents-and-tools/tool-use/implement-tool-use#providing-tool-use-examples)
 
 ### 3. Web Search Tool
 
-让 Claude 直接搜索互联网获取实时信息，自动引用来源。适用于需要最新数据的问答、事实核查、市场调研等场景。
+让 Claude 搜索互联网获取实时信息。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | `web_search_20250305`（基础版）/ `web_search_20260209`（动态过滤版）。Server-side tool，Anthropic 服务端执行搜索。$10/1,000 次搜索。支持 `max_uses`、`allowed_domains`、`blocked_domains`、`user_location`。动态过滤版 Claude 可编写代码过滤搜索结果 |
-| **Bedrock** | **不支持**。`web_search_20250305` tool type 和 `web-search-2025-03-05` beta header 虽被 Bedrock 接受（不报 invalid），但实际调用返回验证错误，无搜索后端。`web_search_20260209` 不被识别 |
-| **实现差异** | 需通过代理层实现 Web Search |
+| **Anthropic** | `web_search_20250305` / `web_search_20260209`（动态过滤版），server-side，$10/1,000 次 |
+| **Bedrock** | 不支持（header 被接受但无搜索后端） |
 
-**Implementation Solution**：
+**方案**：代理端实现 agentic loop——拦截 `web_search_*` 工具调用，调用第三方搜索 API（Tavily/Brave）执行，以 `web_search_tool_result` 注入响应后重新发给 Bedrock，循环至模型不再搜索。动态过滤版需 Docker sandbox 执行 Claude 生成的过滤代码。
 
-代理端实现 agentic loop，拦截并执行搜索：
-
-1. 代理拦截请求中的 `web_search_*` 工具定义，不传递给 Bedrock
-2. 当 Bedrock 返回对 web_search 工具的调用（`server_tool_use`）时，代理拦截该调用
-3. 代理端调用第三方搜索 API（Tavily / Brave Search）执行搜索
-4. 将结果以 `web_search_tool_result` 格式注入响应
-5. 将带有搜索结果的消息重新发送给 Bedrock 继续生成
-6. 循环直到模型不再调用搜索（agentic loop）
-
-动态过滤版（`web_search_20260209`）需额外配合 Docker sandbox 执行 Claude 生成的过滤代码。
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/web-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/web-search-tool)
-- Bedrock: 无对应文档
-- Workaround 参考实现:
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search_service.py) — `WebSearchService` 类，实现 agentic loop、工具拦截、结果注入
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search/providers.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search/providers.py) — Tavily / Brave Search API 调用
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search/domain_filter.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search/domain_filter.py)
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/schemas/web_search.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/schemas/web_search.py)
-
----
+- Anthropic: [web-search-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/web-search-tool)
+- 参考实现: [web_search_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search_service.py) / [providers.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search/providers.py)
 
 ### 4. Web Fetch Tool
 
-让 Claude 抓取指定 URL 的完整页面内容（HTML 和 PDF）。适用于需要分析特定网页、阅读文档、提取结构化数据的场景。与 Web Search 不同，这里是抓取已知 URL 而非搜索关键词。
+抓取指定 URL 的完整页面内容（HTML/PDF）。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | `web_fetch_20250910`（基础版）/ `web_fetch_20260209`（动态过滤版）。Server-side tool，抓取指定 URL 完整内容。无额外费用。支持 HTML 和 PDF |
+| **Anthropic** | `web_fetch_20250910` / `web_fetch_20260209`，server-side，无额外费用 |
 | **Bedrock** | 需自行实现 |
-| **实现差异** | 需通过代理层实现 Web Fetch |
 
-**Implementation Solution**：
+**方案**：类似 Web Search 的 agentic loop——拦截 `web_fetch_*` 调用，用 httpx 抓取 URL，HTML 转纯文本、PDF 以 base64 传递。
 
-与 Web Search 类似的 agentic loop 模式：
-
-- 代理拦截 `web_fetch_*` 工具调用
-- 使用 httpx 直接抓取 URL 内容（无需额外 API Key）
-- 内置 HTML 转纯文本，PDF 以 base64 传递
-- 动态过滤版（`web_fetch_20260209`）需 Docker sandbox
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/web-fetch-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/web-fetch-tool)
-- Bedrock: 无对应文档
-- Workaround 参考实现:
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch_service.py) — `WebFetchService` 类
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch/providers.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch/providers.py) — httpx 直接抓取
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/schemas/web_fetch.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/schemas/web_fetch.py)
-
----
+- Anthropic: [web-fetch-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/web-fetch-tool)
+- 参考实现: [web_fetch_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_fetch_service.py)
 
 ### 5. Code Execution Tool
 
-让 Claude 在安全沙箱中执行 Bash 命令和文件操作。适用于数据分析、图表生成、复杂计算、文件处理等需要实际运行代码的场景。也是 Web Search/Fetch 动态过滤和 PTC 的基础依赖。
+让 Claude 在安全沙箱中执行 Bash 命令和文件操作（也是 Web Search/Fetch 动态过滤和 PTC 的基础依赖）。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | `code_execution_20250825`。Server-side tool，Claude 在安全沙箱中执行 Bash 命令和文件操作。容器规格：5GiB RAM, 5GiB 磁盘, 1 CPU, 无网络。Beta header: `code-execution-2025-08-25`。与 web_search/web_fetch 20260209 配合使用时免费 |
+| **Anthropic** | `code_execution_20250825`，server-side，容器 5GiB RAM / 1 CPU / 无网络，beta header `code-execution-2025-08-25` |
 | **Bedrock** | 需自行实现 |
-| **实现差异** | 需通过代理层提供 Code Execution 容器环境 |
 
-**Implementation Solution**：
+**方案**：代理端管理 Docker 容器，实现 agentic loop——拦截 code execution 调用，在本地容器执行命令/文件操作，结果注入消息后重发。需处理容器生命周期（创建、复用、过期）。
 
-代理端管理 Docker 容器，实现 agentic loop：
-
-1. 代理识别 `code_execution_20250825` 工具定义
-2. 实现 `bash_code_execution` 和 `text_editor_code_execution` 两个子工具
-3. 将 Bedrock 响应中对 code execution 的调用拦截
-4. 在本地 Docker 容器中执行命令/文件操作
-5. 将结果注入消息后重新发送给 Bedrock
-6. 循环直到模型不再调用 code execution
-
-需实现容器生命周期管理（创建、复用、过期）。
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/code-execution-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/code-execution-tool)
-- Bedrock: 无对应文档
-- Workaround 参考实现:
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/standalone_code_execution_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/standalone_code_execution_service.py) — `StandaloneCodeExecutionService` 类，实现 agentic loop
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc/standalone_sandbox.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc/standalone_sandbox.py) — Docker 容器创建、执行、复用、清理
-
----
+- Anthropic: [code-execution-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/code-execution-tool)
+- 参考实现: [standalone_code_execution_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/standalone_code_execution_service.py) / [standalone_sandbox.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc/standalone_sandbox.py)
 
 ### 6. Programmatic Tool Calling (PTC)
 
-让 Claude 编写 Python 代码在沙箱中批量调用客户端工具，减少模型往返次数。适用于需要循环调用多个工具、过滤大量数据、条件分支执行等复杂 Agent 工作流。
+让 Claude 编写 Python 代码在沙箱中批量调用客户端工具，减少模型往返。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | 依赖 Code Execution Tool (`code_execution_20260120`)。Claude 编写 Python 代码在沙箱中调用客户端工具，减少模型往返。关键字段：`allowed_callers`、`caller`。支持模型：Opus 4.6/4.5, Sonnet 4.6/4.5 |
+| **Anthropic** | 依赖 Code Execution (`code_execution_20260120`)，关键字段 `allowed_callers`/`caller`（Opus 4.6/4.5, Sonnet 4.6/4.5） |
 | **Bedrock** | 需自行实现 |
-| **实现差异** | 需通过代理层提供 Code Execution 环境以支持 PTC |
 
-**Implementation Solution**：
+**方案**：代理层实现完整 PTC 协议——过滤 `allowed_callers` 含 `code_execution` 的工具、在 sandbox 执行 Claude 生成的 Python 代码、代码调用客户端工具时暂停并把 `tool_use` 返回客户端、拿到 `tool_result` 后注入 sandbox 继续，最终以 `code_execution_tool_result` 注入消息。
 
-代理层实现完整的 PTC 协议：
-
-1. 识别请求中 `allowed_callers` 包含 `code_execution` 的工具定义
-2. 将这些工具从发给 Bedrock 的请求中过滤掉（Bedrock 不认识 `allowed_callers`）
-3. 当 Bedrock 返回 `tool_use` 且 `caller.type == "code_execution"` 时，代理拦截
-4. 在 Docker sandbox 中执行 Claude 生成的 Python 代码
-5. 当代码中调用了客户端工具时，暂停执行，将 `tool_use` 返回给客户端
-6. 客户端返回 `tool_result` 后，注入回 sandbox 继续执行
-7. 循环直到代码执行完毕，将最终结果作为 `code_execution_tool_result` 注入消息继续对话
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/programmatic-tool-calling](https://docs.anthropic.com/en/agents-and-tools/tool-use/programmatic-tool-calling)
-- Bedrock: 无对应文档
-- Workaround 参考实现:
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc_service.py) — `PTCService` 类，实现完整 PTC 协议
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc/sandbox.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc/sandbox.py) — Docker 容器管理、代码执行
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/schemas/ptc.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/schemas/ptc.py)
-  - [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc_service.py) — `_filter_non_direct_tool_calls()` 函数
-
----
+- Anthropic: [programmatic-tool-calling](https://docs.anthropic.com/en/agents-and-tools/tool-use/programmatic-tool-calling)
+- 参考实现: [ptc_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc_service.py) / [sandbox.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/ptc/sandbox.py)
 
 ### 7. Files API
 
-上传文件后通过 `file_id` 在多次请求中复用，避免每次请求重复传输大文件。适用于需要反复引用同一文档/图片的多轮对话，或配合 Code Execution 上传数据集进行分析。
+上传文件后通过 `file_id` 在多次请求中复用。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | Beta header: `files-api-2025-04-14`。独立文件管理端点（上传/下载/列表/删除）。通过 `file_id` 在多次请求中复用。单文件最大 500MB，组织总存储 100GB |
+| **Anthropic** | beta header `files-api-2025-04-14`，独立文件端点，单文件最大 500MB |
 | **Bedrock** | 需自行实现 |
-| **实现差异** | 需通过代理层实现文件管理，或在请求中内联传递文件内容 |
 
-**Implementation Solution**：
+**方案**：代理层用 S3 存储 + DynamoDB 记录 `file_id → S3 key`，实现 `/v1/files` REST 端点；请求遇 `file_id` 时从 S3 读取内容，按类型转为 `document`/`image`/`container_upload` block 内联注入。
 
-在代理层实现文件存储服务：
-
-- 使用 S3 作为后端存储，提供兼容的 `/v1/files` REST 端点（CRUD）
-- 上传时将文件存入 S3，在 DynamoDB 中记录 `file_id → S3 key` 映射
-- Messages 请求中遇到 `file_id` 引用时，从 S3 读取文件内容
-- 按类型转换为对应的 content block（`document` / `image` / `container_upload`）内联注入请求体后发送给 Bedrock
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/build-with-claude/files](https://docs.anthropic.com/en/build-with-claude/files)
-- Bedrock: 无对应文档
-- Workaround 参考:
-  - S3 文件存储 + DynamoDB 元数据索引方案，参考 AWS 官方 [https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html](https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html)
-  - Anthropic Files API 接口规范: [https://docs.anthropic.com/en/api/files-create](https://docs.anthropic.com/en/api/files-create)
-
----
+- Anthropic: [files](https://docs.anthropic.com/en/build-with-claude/files)
 
 ### 8. Batch Processing
 
-异步批量处理大量请求，享受 50% 折扣。适用于大规模数据标注、批量文档处理、评测跑分等不需要实时响应的场景。
+异步批量处理，享 50% 折扣。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | `POST /v1/messages/batches`。异步批量处理，50% 折扣，最长 24 小时 |
-| **Bedrock** | 有自己的 [https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)，但接口完全不同 |
-| **实现差异** | 接口格式不同，需通过代理层适配 |
+| **Anthropic** | `POST /v1/messages/batches`，50% 折扣，最长 24h |
+| **Bedrock** | 有独立的 [Batch Inference](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)，接口完全不同 |
 
-**Implementation Solution**：
+**方案**：代理层实现 Anthropic Batch API 接口，转换为 Bedrock `CreateModelInvocationJob`（S3 JSONL 输入/输出），或用 SQS 队列 + DynamoDB 状态跟踪逐个执行。
 
-在代理层实现 Anthropic Batch API 接口（`POST /v1/messages/batches`），两种策略：
-
-- **策略 A**：转换为 Bedrock Batch Inference Jobs
-  - 通过 `CreateModelInvocationJob` API
-  - 将批量请求写入 S3 JSONL 文件作为输入
-  - 异步执行后从 S3 读取结果
-- **策略 B**：排队逐个执行（适用于不支持 Batch Inference 的模型）
-  - 使用 SQS 队列排队逐个调用 InvokeModel
-  - 通过 DynamoDB 跟踪每个请求的状态
-  - 客户端轮询 `GET /v1/messages/batches/{id}` 获取结果
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/build-with-claude/batch-processing](https://docs.anthropic.com/en/build-with-claude/batch-processing)
-- Bedrock: [https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html](https://docs.aws.amazon.com/bedrock/latest/userguide/batch-inference.html)
-- Workaround 参考:
-  - Bedrock CreateModelInvocationJob API: [https://docs.aws.amazon.com/bedrock/latest/APIReference/API_CreateModelInvocationJob.html](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_CreateModelInvocationJob.html)
-  - Anthropic Batch API 接口规范: [https://docs.anthropic.com/en/api/creating-message-batches](https://docs.anthropic.com/en/api/creating-message-batches)
-
----
+- Anthropic: [batch-processing](https://docs.anthropic.com/en/build-with-claude/batch-processing)
 
 ### 9. Token Counting
 
-在发送请求前预估 token 用量。适用于需要精确控制成本、预判是否超出 context window、或实现 token 预算管理的场景。
+发送前预估 token 用量。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | `POST /v1/messages/count_tokens`。发送前预估 token 用量 |
-| **Bedrock** | **支持** — Bedrock 提供原生 `CountTokens` API（[文档](https://docs.aws.amazon.com/bedrock/latest/userguide/count-tokens.html)），免费使用，支持 InvokeModel 和 Converse 两种格式 |
-| **实现差异** | 接口格式不同，需适配；仅支持 in-region model ID |
+| **Anthropic** | `POST /v1/messages/count_tokens` |
+| **Bedrock** | **原生支持** [CountTokens API](https://docs.aws.amazon.com/bedrock/latest/userguide/count-tokens.html)，免费，支持 InvokeModel/Converse 格式 |
 
-**Bedrock CountTokens API 使用说明**：
+> ⚠️ **限制**：CountTokens **仅支持 in-region model ID**（如 `anthropic.claude-sonnet-4-6`），用 `us.`/`global.` 前缀会报 `The provided model doesn't support counting tokens`——代理层需剥离前缀。**Opus 4.7 不支持**（仅 global 部署、无 in-region ID）。已验证支持：Claude 3.5 Haiku、Sonnet 4、Sonnet 4.5、Haiku 4.5、Sonnet 4.6、Opus 4.6。见 [test_20](test_20_count_tokens.py)。
 
-- 调用方式：`bedrock_runtime.count_tokens(modelId=..., input={"invokeModel": {"body": ...}})`
-- 支持 InvokeModel 和 Converse 两种输入格式
-- **免费**，不产生任何费用
-- 已验证支持的模型：Claude 3.5 Haiku、Sonnet 4、Sonnet 4.5、Haiku 4.5、Sonnet 4.6、Opus 4.6
+**方案**：代理层实现 `/v1/messages/count_tokens`，转换为 Bedrock CountTokens 格式并用 in-region model ID 调用；不支持的模型回退到本地 tokenizer。
 
-> ⚠️ **重要限制**：CountTokens API **仅支持 in-region model ID**（如 `anthropic.claude-sonnet-4-6`）。使用 cross-region（`us.anthropic.claude-sonnet-4-6`）或 global（`global.anthropic.claude-sonnet-4-6`）前缀会返回 `The provided model doesn't support counting tokens` 错误。代理层需在调用 CountTokens 时剥离 `us.`/`eu.`/`global.` 前缀。
-
-> ⚠️ **Opus 4.7 不支持 CountTokens**：`anthropic.claude-opus-4-7` 和 `global.anthropic.claude-opus-4-7` 均返回 "doesn't support counting tokens"。Opus 4.7 目前仅有 global 部署，没有 in-region model ID，因此 CountTokens API 不可用。需使用本地 tokenizer 估算。
-
-**Implementation Solution**：
-
-在代理层实现 `POST /v1/messages/count_tokens` 端点：
-
-- 将 Anthropic 格式的请求转换为 Bedrock CountTokens API 格式
-- 调用时使用 in-region model ID（剥离 cross-region/global 前缀）
-- 对于不支持 CountTokens 的模型，回退到本地 tokenizer 估算
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/build-with-claude/token-counting](https://docs.anthropic.com/en/build-with-claude/token-counting)
-- Bedrock: 无对应文档
-- Workaround 参考:
-  - Anthropic Token Counting API 规范: [https://docs.anthropic.com/en/api/messages/count_tokens](https://docs.anthropic.com/en/api/messages/count_tokens)
-  - Anthropic Python SDK tokenizer: [https://github.com/anthropics/anthropic-sdk-python](https://github.com/anthropics/anthropic-sdk-python)
-
----
+- Anthropic: [token-counting](https://docs.anthropic.com/en/build-with-claude/token-counting)
 
 ### 10. MCP Connector
 
-在 API 请求中直接连接远程 MCP 服务器，无需客户端实现 MCP 协议。适用于需要在服务端集成多个 MCP 工具源（如 GitHub、Slack、数据库等）的场景。
+在 API 请求中直接连接远程 MCP 服务器。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | Beta header: `mcp-client-2025-11-20`。在 API 请求中通过 `mcp_servers` 字段直接连接远程 MCP 服务器 |
-| **Bedrock** | **不支持**。`mcp-client-2025-11-20` beta header 和 `mcp_servers` 字段虽被 Bedrock 接受和解析，但实际连接 MCP 服务器时返回验证错误 |
-| **实现差异** | 需通过代理层实现 MCP 客户端 |
+| **Anthropic** | beta header `mcp-client-2025-11-20`，通过 `mcp_servers` 字段连接 |
+| **Bedrock** | 不支持（header/字段被解析但连接时报错） |
 
-**Implementation Solution**：
+**方案**：代理层实现 MCP 客户端——解析 `mcp_servers`，用 MCP SDK 连接、`tools/list` 转为 tool 定义注入 `tools`，模型调用时通过 MCP `tools/call` 执行并以 `tool_result` 注入。
 
-在代理层实现 MCP 客户端：
-
-1. 解析请求中的 `mcp_servers` 字段
-2. 使用 MCP SDK 连接指定的远程 MCP 服务器
-3. 调用 `tools/list` 获取工具列表，转换为 Anthropic tool 定义注入请求的 `tools` 数组
-4. 当模型返回对 MCP 工具的调用时，代理通过 MCP 协议调用对应服务器的 `tools/call`
-5. 将结果作为 `tool_result` 注入消息继续对话
-
-需处理 MCP 服务器的连接管理、认证、超时和错误重试。
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/mcp-connector](https://docs.anthropic.com/en/agents-and-tools/mcp-connector)
-- Bedrock: 无对应文档
-- Workaround 参考:
-  - MCP 协议规范: [https://modelcontextprotocol.io/specification](https://modelcontextprotocol.io/specification)
-  - MCP Python SDK: [https://github.com/modelcontextprotocol/python-sdk](https://github.com/modelcontextprotocol/python-sdk)
-  - Anthropic Remote MCP Servers: [https://docs.anthropic.com/en/agents-and-tools/remote-mcp-servers](https://docs.anthropic.com/en/agents-and-tools/remote-mcp-servers)
-
----
+- Anthropic: [mcp-connector](https://docs.anthropic.com/en/agents-and-tools/mcp-connector)
 
 ### 11. Memory Tool
 
-让 Claude 在对话中持久化记忆，跨会话记住用户偏好和上下文。适用于个性化助手、长期客户服务等需要跨对话保持状态的场景。
+让 Claude 跨会话持久化记忆。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | `memory_20250801`。Claude 可在对话中持久化记忆 |
+| **Anthropic** | `memory_20250801` |
 | **Bedrock** | 需自行实现 |
-| **实现差异** | 需通过代理层实现记忆存储 |
 
-**Implementation Solution**：
+**方案**：代理层用 DynamoDB/Redis 按 `user_id`/`organization_id` 分区存储记忆，拦截 memory tool 调用执行 CRUD，搜索可接入向量库（OpenSearch）做语义检索。
 
-在代理层实现记忆存储服务：
+- Anthropic: [memory-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/memory-tool)
 
-- 使用 DynamoDB（或 Redis）作为后端，按 `user_id` / `organization_id` 分区存储记忆条目
-- 拦截请求中的 `memory_20250801` 工具定义
-- 当模型调用 memory tool 时（`add_memory` / `search_memory` / `delete_memory`），代理拦截 `server_tool_use` 调用
-- 在本地执行记忆的 CRUD 操作，将结果以 `tool_result` 格式注入响应
-- 搜索操作可使用 DynamoDB 的 GSI 或接入向量数据库（如 Amazon OpenSearch）实现语义检索
+### 12. Computer Use Tool
 
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/memory-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/memory-tool)
-- Bedrock: 无对应文档
-- Workaround 参考:
-  - 类似的 agentic loop 拦截模式可参考本项目 Web Search 实现: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/web_search_service.py)
-  - Amazon DynamoDB: [https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Introduction.html)
-
----
-
-### 12. Bash Tool / Text Editor Tool
-
-让 Claude 直接执行 bash 命令、编辑文件。适用于自动化运维、代码编辑等需要 Claude 直接操作计算机环境的 Agent 场景（如 Claude Code）。
+让 Claude 操作计算机界面（鼠标/键盘/截屏）。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | `bash_20250124`、`text_editor_20250124` / `text_editor_20250728`。Beta header: `computer-use-2025-01-24`。客户端工具——模型生成 `tool_use`，客户端负责执行 |
-| **Bedrock** | **InvokeModel 和 Converse API 均支持**。需传递 `computer-use-2025-01-24` beta header（InvokeModel 通过 `anthropic_beta` 字段，Converse 通过 `additionalModelRequestFields`） |
+| **Anthropic** | `computer_20250124`，beta header `computer-use-2025-01-24` |
+| **Bedrock** | **完全不支持**（InvokeModel 明确拒绝 `computer_20250124`，即使 Opus 4.6） |
 
-> ⚠️ **Opus 4.7 不可用**：Bedrock 上 Opus 4.7 的 `bash_20250124` 和 `text_editor_20250728` 工具类型均返回 `tool type 'xxx' is not supported for this model`，无论使用 `computer-use-2025-01-24` 还是 `computer-use-2025-11-24` header。Opus 4.6 正常。
-| **实现差异** | Bedrock 上 text editor 的 tool name 必须为 `str_replace_based_edit_tool`（Anthropic 上为 `text_editor`），type 为 `text_editor_20250728`（Anthropic 上还支持 `text_editor_20250124`） |
+**方案**：将 `computer_20250124` 转为普通自定义 tool（`type:"custom"`），手动定义等价 `input_schema`；客户端执行屏幕操作。缺点：失去 Anthropic 对 computer use 的专门优化。
 
-**Implementation Solution**：
+- Anthropic: [computer-use-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/computer-use-tool)
 
-- 通过 InvokeModel API 直接传递工具定义，格式基本兼容
-- 注意 Bedrock 上 text editor 的 name 差异：`str_replace_based_edit_tool`
-- 模型返回 `tool_use` 后，客户端在本地环境执行命令/编辑文件，将 `tool_result` 返回继续对话
+### 13. Agent Skills
 
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/bash-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/bash-tool) / [https://docs.anthropic.com/en/agents-and-tools/tool-use/text-editor-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/text-editor-tool)
-- Bedrock: 通过 InvokeModel API + `computer-use-2025-01-24` beta header 支持
-- Workaround 参考:
-  - Anthropic Computer Use 参考实现: [https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo)
-
----
-
-### 13. Computer Use Tool
-
-让 Claude 操作计算机界面（鼠标点击、键盘输入、截屏）。适用于 UI 自动化测试、RPA 等需要操作图形界面的场景。
+模块化能力扩展包（指令 + 脚本 + 资源），依赖 Code Execution。
 
 | 维度 | 说明 |
 |------|------|
-| **Anthropic** | `computer_20250124`。Beta header: `computer-use-2025-01-24`。需提供 `display_width_px`、`display_height_px` 等参数 |
-| **Bedrock** | **完全不支持**。InvokeModel API 明确拒绝 `computer_20250124` tool type（即使 Opus 4.6 也不支持） |
-| **实现差异** | 需通过自定义 tool 模拟实现 |
-
-**Implementation Solution**：
-
-- 将 `computer_20250124` 工具定义转换为普通的自定义 tool（`type: "custom"`），手动定义等价的 `input_schema`（包含 `action`、`coordinate` 等字段）
-- 模型仍然可以生成类似的工具调用，客户端执行屏幕操作
-- 缺点：失去 Anthropic 对 computer use 的专门优化和训练
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/tool-use/computer-use-tool](https://docs.anthropic.com/en/agents-and-tools/tool-use/computer-use-tool)
-- Bedrock: 不支持
-- Workaround 参考:
-  - Anthropic Computer Use 参考实现: [https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo](https://github.com/anthropics/anthropic-quickstarts/tree/main/computer-use-demo)
-
----
-
-### 14. Agent Skills
-
-模块化能力扩展包，包含指令、脚本和资源文件。适用于为 Claude 添加可复用的专业能力（如数据分析流程、特定领域的工作流模板）。
-
-| 维度 | 说明 |
-|------|------|
-| **Anthropic** | 模块化能力扩展，包含指令、脚本和资源，依赖 Code Execution Tool |
+| **Anthropic** | 依赖 Code Execution Tool |
 | **Bedrock** | 需自行实现 |
-| **实现差异** | 依赖 Code Execution，需先实现 Code Execution 代理层 |
 
-**Implementation Solution**：
+**方案**：先解决 Code Execution gap（第 5 项），再将 skill 指令注入 system prompt、脚本/资源预加载到容器，模型通过 code execution 调用。
 
-需先解决 Code Execution Tool 的 gap（见第 5 项）。在此基础上：
-
-1. 解析请求中的 skill 定义（包含指令、脚本、资源文件）
-2. 将 skill 的指令注入 system prompt
-3. 将 skill 的脚本和资源文件预加载到 Code Execution 容器中
-4. 模型在执行过程中可通过 code execution 调用 skill 提供的脚本
-
-Skills 本质上是对 Code Execution + System Prompt 的结构化封装。
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/agents-and-tools/agent-skills/overview](https://docs.anthropic.com/en/agents-and-tools/agent-skills/overview)
-- Bedrock: 无对应文档
-- Workaround 参考:
-  - Anthropic Skills API 指南: [https://docs.anthropic.com/en/build-with-claude/skills-guide](https://docs.anthropic.com/en/build-with-claude/skills-guide)
-  - 本项目 Code Execution 实现（Skills 的基础依赖）: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/standalone_code_execution_service.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/services/standalone_code_execution_service.py)
+- Anthropic: [agent-skills/overview](https://docs.anthropic.com/en/agents-and-tools/agent-skills/overview)
 
 ---
 
-## Beta Header 在 Bedrock 上的处理
+## 五、Beta Header 在 Bedrock 上的处理
 
-Anthropic API 通过 `anthropic-beta` header 启用实验性功能（[https://docs.anthropic.com/en/api/beta-headers](https://docs.anthropic.com/en/api/beta-headers)）。在 Bedrock 上需分类处理：
+Anthropic API 通过 `anthropic-beta` header 启用实验性功能。在 Bedrock 上分三类处理。
 
-### 直接透传（Bedrock InvokeModel 接受的 beta header）
+### 直接透传（Bedrock InvokeModel 接受）
 
-以下 beta header 在 Bedrock InvokeModel API 上被接受（不会报 "invalid beta flag" 错误）：
+| Beta Header | 功能 | 备注 |
+|------------|------|------|
+| `interleaved-thinking-2025-05-14` | Interleaved Thinking | Opus 4.6 已 deprecated，Sonnet 4.6 仍支持 |
+| `context-management-2025-06-27` | Context Editing | Opus 4.7 不可用 |
+| `compact-2026-01-12` | Compaction | |
+| `computer-use-2025-01-24` / `-11-24` | Computer Use（bash+text editor 可用，computer 不可用） | Opus 4.7 不可用 |
+| `context-1m-2025-08-07` | 1M Context Window | |
+| `structured-outputs-2025-11-13` | Structured Outputs | 仅 4.6 一代 |
+| `token-efficient-tools-2025-02-19` | Token Efficient Tools | Claude 4+ 已内置，无实际效果 |
+| `effort-2025-11-24` | Effort Parameter（已 GA） | Haiku 4.5 不支持 |
+| `tool-examples-2025-10-29` | Tool Input Examples | 仅 Invoke API |
+| `tool-search-tool-2025-10-19` | Tool Search | 仅 Invoke API；Opus 4.7 不可用 |
+| `fine-grained-tool-streaming-2025-05-14` | Fine-grained Tool Streaming（已 GA） | Opus 4.7 不可用 |
+| `task-budgets-2026-03-13` | Task Budgets（Opus 4.7+） | |
+| `pdfs-2024-09-25` | PDF Support（已 GA） | |
+| `output-128k-2025-02-19` | 128k Output（已 GA） | |
+| `token-counting-2024-11-01` | Token Counting | ❌ 功能不可用（用原生 CountTokens API） |
+| `mcp-client-2025-11-20` | MCP Connector | ❌ 功能不可用 |
+| `web-search-2025-03-05` | Web Search | ❌ 功能不可用 |
 
-| Beta Header | 功能 | 实际可用 |
-|------------|------|:---:|
-| `interleaved-thinking-2025-05-14` | Interleaved Thinking | ✅ 已验证 | Opus 4.6 上已 deprecated（adaptive thinking 自动启用），Sonnet 4.6 仍支持 |
-| `context-management-2025-06-27` | Context Editing | ✅ 已验证 |
-| `compact-2026-01-12` | Compaction | ✅ 已验证 |
-| `computer-use-2025-01-24` | Computer Use（bash + text editor 可用，computer 不可用） | ✅ 已验证 |
-| `computer-use-2025-11-24` | Computer Use（新版） | ✅ 已验证 |
-| `context-1m-2025-08-07` | 1M Context Window | ✅ 已验证 |
-| `structured-outputs-2025-11-13` | Structured Outputs | ✅ 已验证 |
-| `token-efficient-tools-2025-02-19` | Token Efficient Tools | ✅ 已验证 |
-| `effort-2025-11-24` | Effort Parameter | ✅ 已验证 |
-| `tool-examples-2025-10-29` | Tool Input Examples | ✅ 已验证 |
-| `tool-search-tool-2025-10-19` | Tool Search | ✅ 已验证 |
-| `fine-grained-tool-streaming-2025-05-14` | Fine-grained Tool Streaming（已 GA，可用 `eager_input_streaming` 替代） | ✅ 已验证 |
-| `task-budgets-2026-03-13` | Task Budgets（Opus 4.7 新增） | ✅ 已验证 |
+### 需要映射（Bedrock 用不同 header 名，仅 InvokeModel）
 
-> ⚠️ **Opus 4.7 功能缺失注意**：以上 beta header 在 Opus 4.7 上均被 Bedrock 接受（不报 invalid），但带真实参数的功能验证发现以下功能在 Opus 4.7 上**不可用**（Bedrock 侧尚未适配）：
-> - `computer-use-2025-01-24` / `computer-use-2025-11-24`：bash/text_editor 工具类型报 `not supported for this model`
-> - `context-management-2025-06-27`：message ID 字段报 `Extra inputs are not permitted`
-> - `tool-search-tool-2025-10-19`：tool_search 工具类型报 `not supported for this model`
-> - `fine-grained-tool-streaming-2025-05-14`：`eager_input_streaming` 字段报 `Extra inputs are not permitted`
-> - `token-efficient-tools-2025-02-19`：有无 header input_tokens 完全一致，Claude 4+ 已内置，header 无实际效果
+| Anthropic Header | Bedrock Header | 功能 |
+|-----------------|---------------|------|
+| `advanced-tool-use-2025-11-20` | `tool-examples-2025-10-29` | Tool Input Examples |
+| `advanced-tool-use-2025-11-20` | `tool-search-tool-2025-10-19` | Tool Search |
+
+### Bedrock 明确拒绝（报 "invalid beta flag"）
+
+`advanced-tool-use-2025-11-20`（聚合 header，需拆分）、`prompt-caching-scope-2026-01-05`、`redact-thinking-2026-02-12`、`files-api-2025-04-14`、`code-execution-2025-05-22` / `-08-25`、`max-tokens-3-5-sonnet-2024-07-15`、`message-batches-2024-09-24`、`web-fetch-2025-09-10`、`fast-mode-2026-02-01`、`skills-2025-10-02`。
+
+参考实现: [config.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py)
+
+---
+
+## 六、Claude Code / Agent SDK 使用 Bedrock 的注意事项
+
+当 Claude Code / Agent SDK 检测到直连 Bedrock（`CLAUDE_CODE_USE_BEDROCK=1`）时，会改变行为：
+
+1. **发送不兼容的 beta headers**（如 `advanced-tool-use-2025-11-20`、`prompt-caching-scope-2026-01-05`），导致 "invalid beta flag"。LiteLLM 曾为此发 incident report。见 [issue #11672](https://github.com/anthropics/claude-code/issues/11672)、[LiteLLM incident](https://docs.litellm.ai/blog/claude-code-beta-headers-incident)。
+2. **max_tokens 自动裁剪**：[issue #8756](https://github.com/anthropics/claude-code/issues/8756)。
+3. **Task tool / 子 Agent 模型 ID 错误**：使用硬编码 Anthropic 模型 ID（缺 `us` 前缀），导致 "model identifier is invalid"。[issue #21235](https://github.com/anthropics/claude-code/issues/21235)。
+4. **tool_use 权限提示延迟 10-20s**：未设 `eager_input_streaming:true`。[issue #26941](https://github.com/anthropics/claude-code/issues/26941)。
+5. **功能降级**：PTC、Web Search、Code Execution 等直连 Bedrock 时不可用。
+
+**Workaround**：通过代理伪装为 Anthropic 官方 API（`CLAUDE_CODE_USE_BEDROCK=0` + 自定义 `ANTHROPIC_BASE_URL`），代理层负责过滤/映射 beta header、映射模型 ID、注入 `eager_input_streaming:true`。参考: [messages.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py)。
+
+> 💡 使用 Mantle 端点（Claude in Amazon Bedrock）时，Claude Code 用 `CLAUDE_CODE_USE_MANTLE=1`，模型 ID 用 `anthropic.` 前缀（无 `global.`/`us.`）。Fable 5 的 project 隔离配置见 [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md)。
+
+---
+
+## 七、Opus 4.8 新特性在 Bedrock 上的状态
+
+Opus 4.8（及 Sonnet 5 / Fable 5）随附几个新卖点，在 Bedrock 上支持情况各异：
+
+| 特性 | Bedrock 可用性 |
+|------|:---:|
+| Mid-conversation System Messages | ✅ 可用（4.8/Fable5/Sonnet5） |
+| effort=`xhigh` | ✅ 可用 |
+| Dynamic Workflows | ⚠️ Claude Code 客户端特性，非 API |
+| Fast Mode (`speed:"fast"`) | ❌ 不支持 |
+| Lower Prompt Cache Min (1024) | ❌ 新一代中仅 Sonnet5/Fable5 生效；Opus 4.7/4.8 仍 4096 |
+
+### Mid-conversation System Messages — ✅ 实测可用
+
+在 `messages` 数组里插入 `{"role":"system"}` 条目，用于长会话中途追加 system 指令而**不改动顶层 `system` 字段**，从而保留前缀 prompt cache。无需 beta header。
+
+- **可用范围**：**Opus 4.8 / Fable 5 / Sonnet 5** 接受并遵守；Opus 4.7 报 `role 'system' is not supported`；4.6 一代报 `Unexpected role "system"`。
+- **官方文档 vs 实测**：Anthropic 文档称 "not available on Amazon Bedrock"，但实测上述三个模型（InvokeModel + mantle）均可用。
+- **放置规则**：`role:system` 条目须紧跟 `user` 轮（或以 server tool use 结尾的 `assistant` 轮），且为数组最后一项或紧接一个 `assistant` 轮；不能位于 `tool_use` 与其 `tool_result` 之间。
+
+**实测结论**（见 [test_23](test_23_mid_conversation_system.py)）：
+
+1. 接受且**遵守**中性 system 指令（"每条回复末尾加 `###MANGO###`" → 照做）。
+2. **Cache 保留**：已缓存前缀（≥4096 token）后追加 mid-sys 条目，下次请求 `cache_read_input_tokens=9117`，前缀缓存未失效 ✅。
+3. **Operator 优先级非绝对**：与用户请求硬冲突时（system "只回一个词" vs 用户 "写三段"），模型指出冲突并倾向用户；中性、不与用户对立的指令才稳定生效。
+
+> ⚠️ 判定该特性是否可用，须用**中性指令**。对抗性措辞（"忽略用户问题"）会触发模型抵抗，造成"不生效"的误判。
 >
-> 以上功能在 Opus 4.6 / Sonnet 4.6 上正常。`tool-examples-2025-10-29` 和 `effort`（已 GA）在 Opus 4.7 上功能正常。
-| `pdfs-2024-09-25` | PDF Support（已 GA） | ✅ |
-| `output-128k-2025-02-19` | 128k Output（已 GA） | ✅ |
-| `token-counting-2024-11-01` | Token Counting | ❌ header 被接受但功能不可用（Bedrock 有原生 CountTokens API，无需此 header） |
-| `mcp-client-2025-11-20` | MCP Connector | ❌ header 被接受但功能不可用 |
-| `web-search-2025-03-05` | Web Search | ❌ header 被接受但功能不可用 |
+> Anthropic: [mid-conversation-system-messages](https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages)（该页称 Bedrock 不支持，与本仓库实测不符）
 
-### 需要映射（Bedrock 用不同 header 名称）
+### Dynamic Workflows — ⚠️ Claude Code 客户端特性，非 API
 
-| Anthropic Header | Bedrock Header | 功能 | 备注 |
-|-----------------|---------------|------|------|
-| `advanced-tool-use-2025-11-20` | `tool-examples-2025-10-29` | Tool Input Examples | 仅 Invoke API |
-| `advanced-tool-use-2025-11-20` | `tool-search-tool-2025-10-19` | Tool Search | 仅 Invoke API |
+Anthropic 宣传 Dynamic Workflows "支持 Anthropic API / Bedrock / Vertex / Foundry"，**易被误解为 Bedrock API 新增能力**。实际上：
 
-> **重要**：这两个 Bedrock beta header 仅在 InvokeModel API 上可用，Converse API 不支持。使用时需自动切换 API。
+> "支持 Bedrock" = **Claude Code 客户端接 Bedrock 后端时能用**，**不是** Bedrock 的 InvokeModel/Messages API 多了 dynamic-workflow 字段。
 
-参考实现: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py)
+编排逻辑全在 Claude Code 客户端：Claude 写一段 JS 编排脚本 → 客户端内的 workflow runtime 执行 → 拉起 N 个 subagent，每个 subagent 只是发**普通 InvokeModel 调用**到 Bedrock。Bedrock 对 "Dynamic Workflows" 无感知。
 
-### Bedrock 明确拒绝的 beta header（报 "invalid beta flag"）
+- **如何用**：Claude Code（CLI/Desktop/IDE，≥ v2.1.154），`ultracode` 关键词 / `/effort ultracode` / `/workflows` 触发。
+- **程序化**：只能走 Claude Code 的 `claude -p`（headless）或 Agent SDK。
+- **Bedrock 限制**：内置 `/deep-research` 依赖 WebSearch（Bedrock 后端不可用），联网类 workflow 跑不全；纯代码类可正常跑。
+- 文档: [introducing-dynamic-workflows](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code)
 
-| Beta Header | 功能 |
-|------------|------|
-| `advanced-tool-use-2025-11-20` | Advanced Tool Use（Anthropic 侧的聚合 header，Bedrock 需用拆分后的 `tool-examples-2025-10-29` / `tool-search-tool-2025-10-19`） |
-| `prompt-caching-scope-2026-01-05` | Prompt Caching Scope |
-| `redact-thinking-2026-02-12` | Thinking 内容脱敏 |
-| `files-api-2025-04-14` | Files API |
-| `code-execution-2025-05-22` | Code Execution（旧版） |
-| `code-execution-2025-08-25` | Code Execution |
-| `max-tokens-3-5-sonnet-2024-07-15` | Max Tokens 3.5 Sonnet |
-| `message-batches-2024-09-24` | Message Batches |
-| `web-fetch-2025-09-10` | Web Fetch |
-| `fast-mode-2026-02-01` | Fast Mode |
-| `skills-2025-10-02` | Agent Skills |
+### Fast Mode — ❌ Bedrock 不支持
 
-参考实现: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/core/config.py)
+顶层设 `speed:"fast"`（+ beta header `fast-mode-2026-02-01`），输出速度最高 2.5×，溢价计费（Opus 4.8: $10/$50 per MTok）。
 
----
+- **Anthropic**：research preview，支持 Opus 4.8/4.7/4.6，需 account manager 申请。
+- **Bedrock**：**不支持**。实测传 `speed:"fast"`（带/不带 beta header）均返回 400 `speed: Extra inputs are not permitted`。官方文档亦明确 "not available on... Amazon Bedrock"。
+- 文档: [fast-mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)
 
-## Claude Code / Agent SDK 使用 Bedrock 时的注意事项
+### Lower Prompt Cache Min — ❌ Opus 4.7/4.8 仍为 4096
 
-当 Claude Code 或 Agent SDK 检测到直连 Bedrock 时（`CLAUDE_CODE_USE_BEDROCK=1`），会改变自身行为：
+Anthropic 宣布 Opus 4.8 将最小可缓存长度从 4,096 降到 1,024。但**该改动在 Bedrock 上未对 Opus 4.7/4.8 生效**。
 
-1. **发送不兼容的 beta headers**：Claude Code 会发送 Bedrock 不支持的 beta header（如 `advanced-tool-use-2025-11-20`、`prompt-caching-scope-2026-01-05`），导致 "invalid beta flag" 错误。这是一个广泛影响的问题，LiteLLM 专门为此发布了 incident report 并实现了 provider-specific beta header 过滤机制。详见：
-   - [https://github.com/anthropics/claude-code/issues/11672](https://github.com/anthropics/claude-code/issues/11672)
-   - [https://docs.litellm.ai/blog/claude-code-beta-headers-incident](https://docs.litellm.ai/blog/claude-code-beta-headers-incident)
-
-2. **max_tokens 自动裁剪**：已知问题 [https://github.com/anthropics/claude-code/issues/8756](https://github.com/anthropics/claude-code/issues/8756)
-
-3. **Task tool / 子 Agent 模型 ID 错误**：Task tool 生成子 Agent 时使用硬编码的 Anthropic 模型 ID（如 `.anthropic.claude-sonnet-4-5-20250929-v1:0`，缺少 `us` 前缀），导致 Bedrock 上 "The provided model identifier is invalid" 错误。所有自定义 Agent 和子 Agent 在 Bedrock 上完全不可用。详见 [https://github.com/anthropics/claude-code/issues/21235](https://github.com/anthropics/claude-code/issues/21235)
-
-4. **tool_use 权限提示延迟 10-20 秒**：Claude Code 未在工具定义中设置 `eager_input_streaming: true`，导致 Bedrock 缓冲整个 tool_use JSON 块后才返回给客户端。直连 Anthropic API 时权限提示约 1-3 秒出现，Bedrock 上需 10-20 秒。详见 [https://github.com/anthropics/claude-code/issues/26941](https://github.com/anthropics/claude-code/issues/26941)
-
-5. **功能降级**：部分高级特性（如 PTC、Web Search、Code Execution）在直连 Bedrock 时不可用
-
-**Workaround**：通过代理伪装为 Anthropic 官方 API（设置 `CLAUDE_CODE_USE_BEDROCK=0` + 自定义 `ANTHROPIC_BASE_URL`），让 SDK 保持完整的 beta header 和行为。代理层负责：
-- 过滤 Bedrock 不支持的 beta header
-- 映射 `advanced-tool-use-2025-11-20` → `tool-examples-2025-10-29` / `tool-search-tool-2025-10-19`
-- 将 Anthropic 模型 ID 映射为 Bedrock 模型 ID
-- 自动为工具定义注入 `eager_input_streaming: true`
-
-参考实现: [https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py](https://github.com/xiehust/anthropic_api_converter/blob/main/app/api/messages.py) — 请求入口，处理模型 ID 映射和 beta header 转换
-
-
----
-
-### Mid-conversation System Messages（Opus 4.8）
-
-在 `messages` 数组里插入 `{"role": "system"}` 条目，用于在长会话中途追加 system 指令，而**不改动顶层 `system` 字段**，从而保留前缀的 prompt cache。Opus 4.8 引入，无需 beta header。
-
-| 维度 | 说明 |
-|------|------|
-| **Anthropic** | Opus 4.8 专属。`messages` 数组中可含 `role: system` 条目，须紧跟一个 `user` 轮（或以 server tool use 结尾的 `assistant` 轮），且为数组最后一项或紧接一个 `assistant` 轮。不能位于 `tool_use` 与其 `tool_result` 之间 |
-| **Bedrock** | **官方文档称 "not available on Amazon Bedrock"，但实测（InvokeModel + mantle）Opus 4.8 可用**：接受 `role:system` 条目且会遵守其指令。Opus 4.7 直接返回 400 `role 'system' is not supported on this model` |
-| **实现差异** | 与 Anthropic API 行为一致（实测层面）；文档与实测不符，依赖前请自行验证 |
-
-**实测结论（2026-06-17，`global.anthropic.claude-opus-4-8`，见 [test_23](test_23_mid_conversation_system.py)）：**
-
-1. **Opus 4.7**：`messages` 含 `role:system` → 400 `role 'system' is not supported on this model`（特性为 4.8 专属）
-2. **Opus 4.8**：接受且**遵守**中性 system 指令（测试："每条回复末尾加 `###MANGO###`" → 模型照做）
-3. **Cache 保留**：在已缓存前缀（system 字段，需 ≥ 4096 token）后追加 mid-sys 条目，下一次请求 `cache_read_input_tokens=9117`，前缀缓存未失效 ✅
-4. **Operator 优先级非绝对**：当 mid-sys 指令与用户请求**硬冲突**时（如 system 要求"只回一个词" vs 用户要求"写三段长文"），模型不会盲目执行 system，而是**指出冲突并倾向用户**。中性、不与用户对立的指令才稳定生效
-
-> ⚠️ 注意：早期测试若用对抗性措辞（如 "ignore the question / 忽略用户问题"）会被模型抵抗，造成"特性不生效"的误判。判定该特性是否可用，应使用**中性指令**。
-
-**参考链接**：
-- Anthropic: [https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages](https://docs.anthropic.com/en/build-with-claude/mid-conversation-system-messages)（注：该页声明 Bedrock 不支持，与本仓库实测不符）
-
-
----
-
-### Dynamic Workflows（Opus 4.8）—— Claude Code 客户端特性，非 API 特性
-
-Anthropic 宣传 Dynamic Workflows "支持 Anthropic API / Amazon Bedrock / Vertex AI / Microsoft Foundry"，**容易被误解为 Bedrock API 新增了能力**。实际上：
-
-> "支持 Bedrock" = **Claude Code 这个客户端工具接 Bedrock 后端时能用 Dynamic Workflows**，**不是** Bedrock 的 InvokeModel/Messages API 多了 dynamic-workflow 字段或端点。
-
-**它在哪一层：**
-
-```
-Claude Code（客户端）
-  ├── Claude 写出一段 JS 编排脚本
-  ├── workflow runtime（在 Claude Code 进程内）执行脚本
-  └── 脚本拉起 N 个 subagent
-        └── 每个 subagent → 普通 InvokeModel 调用 → Bedrock 后端
-```
-
-编排、并行调度、脚本执行全在 Claude Code 客户端完成。Bedrock 只收到一堆**普通的 InvokeModel 请求**，对 "Dynamic Workflows" 无感知。
-
-| 维度 | 说明 |
-|------|------|
-| **本质** | Claude Code 客户端的编排能力（research preview），不是模型 API 特性 |
-| **API 层** | Bedrock InvokeModel/Messages **无任何对应字段**，无法通过调 API 启用 |
-| **如何用** | Claude Code（CLI/Desktop/IDE），需 ≥ v2.1.154；触发：prompt 加 `ultracode` 关键词、说"用 workflow"、或 `/effort ultracode`；用 `/workflows` 查看 |
-| **程序化** | 只能走 Claude Code 的 `claude -p`（headless）或 Agent SDK，仍是客户端层 |
-| **Bedrock 限制** | 内置 `/deep-research` 依赖 WebSearch，而 WebSearch 在 Bedrock 后端不可用 → 联网类 workflow 跑不全；纯代码类（改文件/跑测试/并行审计）可正常跑 |
-
-> 对比：[Mid-conversation System Messages](#mid-conversation-system-messagesopus-48) 是**真正的 API 特性**（messages 里塞 `role:system`），Bedrock Opus 4.8 实测可用；而 Dynamic Workflows 是**客户端特性**，"支持 Bedrock"只是指客户端能接 Bedrock 后端。
-
-**参考链接**：
-- Claude Code 文档: [https://docs.claude.com/en/docs/claude-code/workflows](https://docs.claude.com/en/docs/claude-code/workflows)
-- 公告: [https://claude.com/blog/introducing-dynamic-workflows-in-claude-code](https://claude.com/blog/introducing-dynamic-workflows-in-claude-code)
-
-
----
-
-### Fast Mode（Opus 4.8）—— Bedrock 不支持
-
-请求顶层设 `speed: "fast"`（+ beta header `fast-mode-2026-02-01`），同一模型输出速度最高 2.5×，溢价计费（Opus 4.8: $10/$50 per MTok）。
-
-| 维度 | 说明 |
-|------|------|
-| **Anthropic** | research preview，支持 Opus 4.8/4.7/4.6，需 account manager 申请 access。响应 `usage.speed` 返回 `"fast"`/`"standard"` |
-| **Bedrock** | **不支持**。实测 Opus 4.8 传 `speed:"fast"`（带/不带 beta header）均返回 400 `speed: Extra inputs are not permitted` |
-| **实现差异** | 官方文档明确 "not available on third-party platforms, including Vertex AI, Amazon Bedrock, and Microsoft Foundry"，实测一致 |
-
-**实测（2026-06-17，`global.anthropic.claude-opus-4-8`）：**
-```
-speed:"fast" 无 beta header    → 400 speed: Extra inputs are not permitted
-speed:"fast" + fast-mode beta  → 400 speed: Extra inputs are not permitted
-```
-
-**参考**：[https://platform.claude.com/docs/en/build-with-claude/fast-mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)
-
----
-
-### Lower Prompt Cache Min（Opus 4.8）—— Bedrock 仍为 4096
-
-Anthropic 宣布 Opus 4.8 将最小可缓存提示长度从 4,096 降到 **1,024 tokens**。但该改动**仅在 Claude API 生效，Bedrock 未跟进**。
-
-| 维度 | 说明 |
-|------|------|
-| **Anthropic** | Opus 4.8 最小可缓存长度 1,024 tokens |
-| **Bedrock** | **实测仍为 4,096 tokens**。低于 ~4096 token 的 prompt 设 `cache_control` 也不会缓存（`cache_creation_input_tokens=0`） |
-
-**实测边界扫描（2026-06-17，`global.anthropic.claude-opus-4-8`）：**
-
-| prompt 大小 | 是否缓存 |
-|------------|:---:|
-| 4018 tokens | ❌ not cached |
-| 4135 tokens | ✅ cached |
-
-边界精确落在 4018↔4135 之间，即 **4096**——与各模型卡片标注的 4,096 一致，文档宣传的 1,024 在 Bedrock 上未生效。做 prompt caching 设计时，Bedrock 上 Opus 4.8 的缓存内容仍须 ≥ 4096 tokens。
-
-> 对比：Fable 5 在 Bedrock 上最小可缓存长度是 1,024（见模型卡片），Opus 4.6/4.7/4.8 均为 4,096。
+- **实测边界扫描**（Opus 4.8）：4018 tokens ❌ 不缓存 / 4135 tokens ✅ 缓存 → 边界即 **4096**。
+- **对比**：新一代中 **Sonnet 5 / Fable 5 的最小长度确实是 ~1,024**（实测），Sonnet 4.6 为 2,048，Opus 4.7/4.8 / Haiku 4.5 为 4,096。设计缓存时按模型区分。
