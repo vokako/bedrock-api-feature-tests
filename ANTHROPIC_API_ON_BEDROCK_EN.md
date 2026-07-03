@@ -54,9 +54,9 @@ This document walks through each Anthropic Messages API feature and its native s
 | Structured Outputs (`output_config.format`) | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
 | Mid-conversation System Messages (`role:system`) | ✅ | ✅ | ✅ | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 |
 | Assistant Prefill | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Min cacheable prompt length | ~1,024 | ~1,024 | 4,096 | 4,096 | ~2,048\* | 2,048 | ~4,096 |
+| Min cacheable prompt length (model-card value) | 4,096 | 1,024 | 4,096 | 4,096 | 4,096 | 1,024 | 4,096 |
 
-\* Opus 4.6 not precisely scanned; inferred as 2,048 (same gen as Sonnet 4.6). Verify before relying on it.
+Values from each model's AWS model card ("Min tokens per cache checkpoint", authoritative). Rule: **only Fable 5 and Sonnet 4.6 are 1,024; all others (Sonnet 5, Opus 4.6/4.7/4.8, Haiku 4.5) are 4,096**. Below this length, `cache_control` does nothing.
 
 ### Key differences
 
@@ -64,7 +64,7 @@ This document walks through each Anthropic Messages API feature and its native s
 - **Sampling params removed on new-gen**: `temperature`/`top_p`/`top_k` with non-default values return 400. Guide behavior via prompting instead.
 - **Structured Outputs has a "generational reversal"**: `output_config.format` works on the **4.6 generation (including Haiku 4.5)** but returns 400 on all new-gen models. Branch by model — 4.6 gen uses `output_config.format`, new-gen uses **forced tool use** (`tool_choice` forcing a tool + `input_schema`).
 - **Mid-conversation system messages**: only **Opus 4.8 / Fable 5 / Sonnet 5** accept and honor `role:system` inside `messages` (see [Section 7](#7-opus-48-new-features-on-bedrock)).
-- **Prompt cache minimum varies widely**: Sonnet 5 / Fable 5 as low as **1,024**; Sonnet 4.6 is **2,048**; Opus 4.7 / 4.8 / Haiku 4.5 are **4,096**. Below the threshold, `cache_control` does nothing (`cache_creation_input_tokens=0`). The new-gen tokenizer is more "inflationary" — the same text counts ~1.4–1.7× more tokens than the 4.6 gen.
+- **Prompt cache minimum varies by model**: **Fable 5 and Sonnet 4.6 are 1,024**; **Sonnet 5, Opus 4.6/4.7/4.8, Haiku 4.5 are 4,096** (from each model card's "Min tokens per cache checkpoint"). Below the threshold, `cache_control` does nothing (`cache_creation_input_tokens=0`). The new-gen tokenizer is more "inflationary" — the same text counts ~1.4–1.7× more tokens than the 4.6 gen.
 - **Assistant Prefill**: since Claude 4.6 (including new-gen), a trailing assistant message for prefill returns 400 `This model does not support assistant message prefill`. Only Haiku 4.5 still supports it. Alternative: use [Structured Outputs](#structured-outputs) or a system prompt to control format.
 
 ### Opus 4.7 adaptation gaps on Bedrock (summary)
@@ -517,7 +517,7 @@ Opus 4.8 (and Sonnet 5 / Fable 5) ship several new selling points with varying B
 | effort=`xhigh` | ✅ available |
 | Dynamic Workflows | ⚠️ Claude Code client feature, not an API |
 | Fast Mode (`speed:"fast"`) | ❌ unsupported |
-| Lower Prompt Cache Min (1024) | ❌ among new-gen, only Sonnet5/Fable5; Opus 4.7/4.8 still 4096 |
+| Lower Prompt Cache Min (1024) | ❌ Opus 4.7/4.8/Sonnet5 still 4096; only Fable 5 / Sonnet 4.6 are 1024 |
 
 ### Mid-conversation System Messages — ✅ verified working
 
@@ -558,9 +558,20 @@ Set top-level `speed:"fast"` (+ beta header `fast-mode-2026-02-01`) for up to 2.
 - **Bedrock**: **not supported**. `speed:"fast"` (with or without the beta header) returns 400 `speed: Extra inputs are not permitted`. Docs also state "not available on... Amazon Bedrock".
 - Docs: [fast-mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)
 
-### Lower Prompt Cache Min — ❌ Opus 4.7/4.8 still 4096
+### Lower Prompt Cache Min — ❌ Opus 4.7/4.8/Sonnet 5 still 4096
 
 Anthropic announced Opus 4.8 lowers the minimum cacheable length from 4,096 to 1,024. But **this did not take effect for Opus 4.7/4.8 on Bedrock**.
 
-- **Boundary scan** (Opus 4.8): 4018 tokens ❌ not cached / 4135 tokens ✅ cached → boundary = **4096**.
-- **Contrast**: among new-gen, **Sonnet 5 / Fable 5 do have ~1,024** (measured); Sonnet 4.6 is 2,048; Opus 4.7/4.8 / Haiku 4.5 are 4,096. Branch cache design by model.
+Official "Min tokens per cache checkpoint" per model card (authoritative):
+
+| Model | Min cacheable length |
+|-------|:---:|
+| Fable 5 | 1,024 |
+| Sonnet 4.6 | 1,024 |
+| Sonnet 5 | 4,096 |
+| Opus 4.6 / 4.7 / 4.8 | 4,096 |
+| Haiku 4.5 | 4,096 |
+
+I.e. **only Fable 5 and Sonnet 4.6 are 1,024; all others are 4,096**. An InvokeModel boundary scan for Opus 4.8 also confirms 4096 (4018 tokens not cached / 4135 tokens cached). Branch cache design by model — below the threshold nothing is cached.
+
+> ⚠️ Note: inferring the minimum from `cache_creation_input_tokens` on the `global.` cross-region endpoint produces noisy/non-monotonic results and is unreliable — rely on each model card's official value.

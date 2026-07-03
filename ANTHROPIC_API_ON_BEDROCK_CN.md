@@ -54,9 +54,9 @@
 | Structured Outputs（`output_config.format`） | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
 | Mid-conversation System Messages（`role:system`） | ✅ | ✅ | ✅ | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 |
 | Assistant Prefill | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| 最小可缓存长度（prompt cache min） | ~1,024 | ~1,024 | 4,096 | 4,096 | ~2,048\* | 2,048 | ~4,096 |
+| 最小可缓存长度（模型卡片官方值） | 4,096 | 1,024 | 4,096 | 4,096 | 4,096 | 1,024 | 4,096 |
 
-\* Opus 4.6 未精确扫描，按同代 Sonnet 4.6 推断为 2,048，依赖前请自测。
+数值取自各模型的 AWS 模型卡片 "Min tokens per cache checkpoint"（权威来源）。规律：**仅 Fable 5 和 Sonnet 4.6 为 1,024，其余（Sonnet 5、Opus 4.6/4.7/4.8、Haiku 4.5）均为 4,096**。低于该长度即使设 `cache_control` 也不会缓存。
 
 ### 关键差异要点
 
@@ -64,7 +64,7 @@
 - **采样参数在新一代被移除**：`temperature`/`top_p`/`top_k` 传非默认值一律 400。改用 prompt 引导行为。
 - **Structured Outputs 出现"代际反转"**：`output_config.format` 在 **4.6 一代（含 Haiku 4.5）可用**，但在**新一代全部 400**。做结构化输出须按模型分流——4.6 一代用 `output_config.format`，新一代改用 **forced tool use**（`tool_choice` 指定工具 + `input_schema`）。
 - **Mid-conversation system messages**：仅 **Opus 4.8 / Fable 5 / Sonnet 5** 接受并遵守 `messages` 内的 `role:system`（见[第七节](#七opus-48-新特性在-bedrock-上的状态)）。
-- **Prompt cache 最小长度差异大**：Sonnet 5 / Fable 5 低至 **1,024**；Sonnet 4.6 为 **2,048**；Opus 4.7 / 4.8 / Haiku 4.5 为 **4,096**。低于门槛即使设 `cache_control` 也不缓存（`cache_creation_input_tokens=0`）。注意新一代 tokenizer 更"膨胀"，同样文本 token 数比 4.6 一代高约 1.4–1.7×。
+- **Prompt cache 最小长度按模型不同**：**Fable 5 与 Sonnet 4.6 为 1,024**；**Sonnet 5、Opus 4.6/4.7/4.8、Haiku 4.5 均为 4,096**（取自各模型卡片官方 "Min tokens per cache checkpoint"）。低于门槛即使设 `cache_control` 也不缓存（`cache_creation_input_tokens=0`）。注意新一代 tokenizer 更"膨胀"，同样文本 token 数比 4.6 一代高约 1.4–1.7×。
 - **Assistant Prefill**：Claude 4.6 起（含新一代）不再支持对话最后一条为 assistant 的预填充，发送返回 400 `This model does not support assistant message prefill`。仅 Haiku 4.5 仍支持。替代：用 [Structured Outputs](#structured-outputs) 或 system prompt 控制格式。
 
 ### Opus 4.7 在 Bedrock 上的适配缺口（汇总）
@@ -517,7 +517,7 @@ Opus 4.8（及 Sonnet 5 / Fable 5）随附几个新卖点，在 Bedrock 上支�
 | effort=`xhigh` | ✅ 可用 |
 | Dynamic Workflows | ⚠️ Claude Code 客户端特性，非 API |
 | Fast Mode (`speed:"fast"`) | ❌ 不支持 |
-| Lower Prompt Cache Min (1024) | ❌ 新一代中仅 Sonnet5/Fable5 生效；Opus 4.7/4.8 仍 4096 |
+| Lower Prompt Cache Min (1024) | ❌ Opus 4.7/4.8/Sonnet5 仍 4096；仅 Fable 5 / Sonnet 4.6 为 1024 |
 
 ### Mid-conversation System Messages — ✅ 实测可用
 
@@ -558,9 +558,20 @@ Anthropic 宣传 Dynamic Workflows "支持 Anthropic API / Bedrock / Vertex / Fo
 - **Bedrock**：**不支持**。实测传 `speed:"fast"`（带/不带 beta header）均返回 400 `speed: Extra inputs are not permitted`。官方文档亦明确 "not available on... Amazon Bedrock"。
 - 文档: [fast-mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode)
 
-### Lower Prompt Cache Min — ❌ Opus 4.7/4.8 仍为 4096
+### Lower Prompt Cache Min — ❌ Opus 4.7/4.8/Sonnet 5 仍为 4096
 
 Anthropic 宣布 Opus 4.8 将最小可缓存长度从 4,096 降到 1,024。但**该改动在 Bedrock 上未对 Opus 4.7/4.8 生效**。
 
-- **实测边界扫描**（Opus 4.8）：4018 tokens ❌ 不缓存 / 4135 tokens ✅ 缓存 → 边界即 **4096**。
-- **对比**：新一代中 **Sonnet 5 / Fable 5 的最小长度确实是 ~1,024**（实测），Sonnet 4.6 为 2,048，Opus 4.7/4.8 / Haiku 4.5 为 4,096。设计缓存时按模型区分。
+各模型卡片官方 "Min tokens per cache checkpoint"（权威值）：
+
+| 模型 | 最小可缓存长度 |
+|------|:---:|
+| Fable 5 | 1,024 |
+| Sonnet 4.6 | 1,024 |
+| Sonnet 5 | 4,096 |
+| Opus 4.6 / 4.7 / 4.8 | 4,096 |
+| Haiku 4.5 | 4,096 |
+
+即：**只有 Fable 5 和 Sonnet 4.6 是 1,024，其余均为 4,096**。Opus 4.8 的 InvokeModel 实测边界扫描也印证为 4096（4018 tokens 不缓存 / 4135 tokens 缓存）。设计缓存时按模型区分，低于门槛不会缓存。
+
+> ⚠️ 注意：在 `global.` cross-region 端点上用 `cache_creation_input_tokens` 反推最小长度会出现噪声/非单调结果，不可靠——请以各模型卡片的官方值为准。
