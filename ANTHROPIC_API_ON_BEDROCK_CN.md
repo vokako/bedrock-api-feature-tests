@@ -14,7 +14,7 @@
 
 ---
 
-> 📌 本文档基于 Bedrock InvokeModel API 实测验证（Sonnet 4.6 / Opus 4.7），所有标注 ✅ 的特性均有对应测试脚本。
+> 📌 本文档基于 Bedrock InvokeModel API 实测验证。最近一次全模型复核：**2026-07-03**（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5）。所有标注 ✅ 的特性均有对应测试脚本。跨模型差异见下方「模型状态复核」。
 
 ## 总览
 
@@ -54,6 +54,34 @@
 | Dynamic Workflows | ✅ | ❌ | ❌ | **Claude Code 客户端特性，非 API**；"支持 Bedrock"指 Claude Code 接 Bedrock 后端可用 | — |
 | Fast Mode (`speed:"fast"`) | ✅ | ❌ | ❌ | research preview，仅 Claude API；Bedrock 拒绝 `speed` 字段 | — |
 | Lower Prompt Cache Min (1024) | ✅ | ❌ | ❌ | 仅 Claude API；Bedrock Opus 4.8 实测仍为 4096 | — |
+
+---
+
+## 模型状态复核（2026-07-03，全 runtime `global.` 前缀实测）
+
+覆盖当前 Bedrock 上的现代模型。**结论：模型明显分成"新一代"（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）和"4.6 一代"（Opus 4.6 / Sonnet 4.6 / Haiku 4.5）两种行为**。
+
+| 特性 | Sonnet 5 | Fable 5 | Opus 4.8 | Opus 4.7 | Opus 4.6 | Sonnet 4.6 | Haiku 4.5 |
+|------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 基础调用 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `thinking.type:"enabled"`（+budget_tokens） | ❌400 | ❌400 | ❌400 | ❌400 | ✅ | ✅ | ✅ |
+| 采样参数 `temperature`/`top_p`/`top_k` | ❌400 | ❌400 | ❌400 | ❌400 | ✅ | ✅ | ✅ |
+| Adaptive Thinking + `output_config.effort` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌（不支持 effort 字段） |
+| **Structured Outputs（`output_config.format`）** | ❌400 | ❌400 | ❌400 | ❌400 | ✅ | ✅ | ✅ |
+| **Mid-conversation System Messages（messages 内 `role:system`）** | ✅遵守 | ✅遵守 | ✅遵守 | ❌400 | ❌400 | ❌400 | ❌400 |
+| **最小可缓存长度（prompt cache min）** | ~1,024 | ~1,024 | 4,096 | 4,096 | ~2,048* | 2,048 | ~4,096 |
+
+\* Opus 4.6 未精确扫描，按 Sonnet 4.6 同代推断为 2,048，依赖前请自测。
+
+### 要点
+
+- **新一代（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）统一行为**：只支持 adaptive thinking（`type:"enabled"` 和采样参数一律 400）；**不支持** `output_config.format`（结构化输出改用 forced tool use）。
+- **Mid-conversation system messages**：仅 **Opus 4.8 / Fable 5 / Sonnet 5** 接受并遵守（messages 里塞 `role:system`）；Opus 4.7 报 `role 'system' is not supported`；4.6 一代报 `Unexpected role "system"`。官方文档称 Bedrock 不支持，但实测这三个模型可用。详见 [test_23](test_23_mid_conversation_system.py)。
+- **Structured Outputs 反向变化**：`output_config.format` 在 **4.6 一代（含 Haiku 4.5）可用**，但在**新一代全部 400**。做结构化输出时须按模型分流：4.6 用 `output_config.format`，新一代用 forced tool use。
+- **Prompt cache 最小长度差异大**：Sonnet 5 / Fable 5 低至 **1,024**；Sonnet 4.6 为 **2,048**；Opus 4.7 / 4.8 / Haiku 4.5 为 **4,096**。设计缓存时按模型区分，否则短 prompt 在高门槛模型上不会被缓存（`cache_creation_input_tokens=0`）。注意新一代 tokenizer 更"膨胀"，同样文本 token 数比 4.6 一代高约 1.4–1.7×。
+- **Haiku 4.5**：不接受 `output_config.effort` 字段（其余特性正常）。
+- **Fable 5**：曾于 2026-06 从 Bedrock 短暂下线（runtime 5xx / mantle 404），后"back on Amazon Bedrock with stronger guardrails"重新上线，2026-07-03 复测 runtime + mantle 均恢复正常。详见 [test_22](test_22_fable5.py) 与 [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md)。
+- **Sonnet 5**（2026-06-30 发布）：最强 agentic Sonnet，1M 上下文 / 128k 输出，特性与 Sonnet 4.6 相同（除 Priority Tier）。在 Bedrock 上行为归入"新一代"（见上表）。
 
 ---
 
