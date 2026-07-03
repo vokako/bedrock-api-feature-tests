@@ -78,6 +78,35 @@ Bedrock provides two APIs for calling Claude models:
 
 ---
 
+## Model Status Re-verification (2026-07-03, all via runtime `global.` prefix)
+
+Covers the modern models currently on Bedrock. **Key takeaway: models split into a "new generation" (Sonnet 5 / Fable 5 / Opus 4.8 / 4.7) and the "4.6 generation" (Opus 4.6 / Sonnet 4.6 / Haiku 4.5).**
+
+| Feature | Sonnet 5 | Fable 5 | Opus 4.8 | Opus 4.7 | Opus 4.6 | Sonnet 4.6 | Haiku 4.5 |
+|---------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Basic invocation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `thinking.type:"enabled"` (+budget_tokens) | ❌400 | ❌400 | ❌400 | ❌400 | ✅ | ✅ | ✅ |
+| Sampling `temperature`/`top_p`/`top_k` | ❌400 | ❌400 | ❌400 | ❌400 | ✅ | ✅ | ✅ |
+| Adaptive Thinking + `output_config.effort` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ (no effort field) |
+| **Structured Outputs (`output_config.format`)** | ❌400 | ❌400 | ❌400 | ❌400 | ✅ | ✅ | ✅ |
+| **Mid-conversation System Messages (`role:system` in messages)** | ✅ honored | ✅ honored | ✅ honored | ❌400 | ❌400 | ❌400 | ❌400 |
+| **Min cacheable prompt length** | ~1,024 | ~1,024 | 4,096 | 4,096 | ~2,048* | 2,048 | ~4,096 |
+
+\* Opus 4.6 not precisely scanned; inferred as 2,048 (same gen as Sonnet 4.6). Verify before relying on it.
+
+### Key points
+
+- **Thinking still works — the API just changed.** New-gen models (Sonnet 5 / Fable 5 / Opus 4.8 / 4.7) removed the legacy `thinking.type:"enabled"` + `budget_tokens` (returns 400) in favor of **adaptive thinking** (`thinking.type:"adaptive"` + `output_config.effort`). Verified working (e.g., Sonnet 5 / Opus 4.7 produced thousands of thinking tokens on hard problems). The ❌400 on the `type:"enabled"` row refers to the legacy form only, not to thinking being unavailable. Adaptive decides per request whether to think (easy prompts may emit no thinking block).
+- **New-gen unified behavior**: adaptive-thinking-only (`type:"enabled"` and sampling params return 400); **no** `output_config.format` (use forced tool use for structured output).
+- **Mid-conversation system messages**: only **Opus 4.8 / Fable 5 / Sonnet 5** accept and honor `role:system` in `messages`. Opus 4.7 returns `role 'system' is not supported`; the 4.6 gen returns `Unexpected role "system"`. Anthropic docs say Bedrock is unsupported, but these three work empirically. See [test_23](test_23_mid_conversation_system.py).
+- **Structured Outputs reversal**: `output_config.format` works on the **4.6 generation (including Haiku 4.5)** but returns 400 on all new-gen models. Branch by model: 4.6 gen uses `output_config.format`, new-gen uses forced tool use.
+- **Prompt cache minimum varies widely**: Sonnet 5 / Fable 5 as low as **1,024**; Sonnet 4.6 is **2,048**; Opus 4.7 / 4.8 / Haiku 4.5 are **4,096**. Below the threshold, `cache_control` does nothing (`cache_creation_input_tokens=0`). Note the new-gen tokenizer is more "inflationary" — the same text counts ~1.4–1.7× more tokens than the 4.6 gen.
+- **Haiku 4.5**: does not accept the `output_config.effort` field (other features work).
+- **Fable 5**: was briefly delisted from Bedrock in 2026-06 (runtime 5xx / mantle 404), then relaunched "back on Amazon Bedrock with stronger guardrails"; re-verified working on runtime + mantle on 2026-07-03. See [test_22](test_22_fable5.py) and [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md).
+- **Sonnet 5** (released 2026-06-30): most agentic Sonnet, 1M context / 128k output, same features as Sonnet 4.6 (except Priority Tier). On Bedrock it behaves as new-gen (see table).
+
+---
+
 ## Natively Supported Features
 
 ### Messages API

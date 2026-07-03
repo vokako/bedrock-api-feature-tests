@@ -75,6 +75,7 @@
 
 ### 要点
 
+- **Thinking 仍然支持，只是换了 API**：新一代（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）移除了旧版 `thinking.type:"enabled"` + `budget_tokens`（传了报 400），改用 **adaptive thinking**（`thinking.type:"adaptive"` + `output_config.effort`），实测思考正常工作（如 Sonnet 5 / Opus 4.7 在难题上产出数千 thinking tokens）。矩阵中 `type:"enabled"` 那行的 ❌400 指的是旧写法，不代表 thinking 不可用。adaptive 会自适应决定是否思考（简单问题可能不产 thinking block）。
 - **新一代（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）统一行为**：只支持 adaptive thinking（`type:"enabled"` 和采样参数一律 400）；**不支持** `output_config.format`（结构化输出改用 forced tool use）。
 - **Mid-conversation system messages**：仅 **Opus 4.8 / Fable 5 / Sonnet 5** 接受并遵守（messages 里塞 `role:system`）；Opus 4.7 报 `role 'system' is not supported`；4.6 一代报 `Unexpected role "system"`。官方文档称 Bedrock 不支持，但实测这三个模型可用。详见 [test_23](test_23_mid_conversation_system.py)。
 - **Structured Outputs 反向变化**：`output_config.format` 在 **4.6 一代（含 Haiku 4.5）可用**，但在**新一代全部 400**。做结构化输出时须按模型分流：4.6 用 `output_config.format`，新一代用 forced tool use。
