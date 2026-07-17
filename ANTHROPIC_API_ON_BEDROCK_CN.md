@@ -76,7 +76,7 @@ Opus 4.7 有多个特性 Bedrock 侧尚未适配（beta header 被接受但带�
 | Computer Use（bash/text_editor） | `tool type ... is not supported for this model` |
 | Context Editing（message ID） | `messages.0.id: Extra inputs are not permitted` |
 | Tool Search | `tool_search ... not supported for this model` |
-| Fine-grained Tool Streaming（`eager_input_streaming`） | `Extra inputs are not permitted` |
+| Fine-grained Tool Streaming（`eager_input_streaming`） | ~~曾报 `Extra inputs are not permitted`~~ 2026-07-17 复测已可用 |
 | CountTokens | 仅 global 部署、无 in-region ID，不可用 |
 | Mid-conversation system messages | `role 'system' is not supported`（4.8 已支持） |
 
@@ -102,7 +102,7 @@ Opus 4.7 有多个特性 Bedrock 侧尚未适配（beta header 被接受但带�
 | PDF Support | ✅ | ✅ | ✅ | 无 | [test_08](test_08_pdf_support.py) |
 | Citations | ✅ | ✅ | ✅ | 无 | [test_09](test_09_citations.py) |
 | Structured Outputs (`output_config.format`) | ✅ | ✅ | ✅ | **仅 4.6 一代**；新一代 400 | [test_10](test_10_structured_outputs.py) |
-| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | 仅 4.6 系列；Opus 4.7 不可用 | [test_11](test_11_eager_input_streaming.py) |
+| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | 4.6 系列 + 新一代（Opus 4.7/4.8、Fable 5，2026-07-17 复测）均支持 | [test_11](test_11_eager_input_streaming.py) |
 | Compaction | ✅ | ✅ | ✅ | 无 | [test_12](test_12_compaction.py) |
 | Context Editing | ✅ | ✅ | ✅ | Opus 4.7 不可用 | [test_13](test_13_context_editing.py) |
 | Tool Search | ✅ | ❌ | ✅ | 仅 Invoke API；Opus 4.7 不可用 | [test_14](test_14_tool_search.py) |
@@ -265,7 +265,7 @@ Claude 在回答中引用来源文档的具体位置，适用于 RAG、文档问
 
 - **Anthropic**: [fine-grained-tool-streaming](https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming)
 - **Bedrock**: 全平台 GA，无需 beta header。在工具定义中设 `"eager_input_streaming": true`。
-- **模型兼容性**：`eager_input_streaming` 仅 Claude 4.6 系列支持；Sonnet 4.5 及更早、Opus 4.7 上会 400（`Extra inputs are not permitted`）。Sonnet 4.5 本身已默认细粒度流式返回，无需该字段。代理层应按模型版本决定是否注入。
+- **模型兼容性**：4.6 系列及新一代（Opus 4.7 / Opus 4.8 / Fable 5）均支持（2026-07-17 实测三者流式 tool_use 输入正常；Opus 4.7 早期不支持，现已修复）。Sonnet 4.5 及更早会 400（`Extra inputs are not permitted`），且 Sonnet 4.5 本身已默认细粒度流式返回，无需该字段。代理层应按模型版本决定是否注入。
 
 ### Compaction
 

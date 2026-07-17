@@ -76,7 +76,7 @@ Several features are not yet adapted for Opus 4.7 on Bedrock (the beta header is
 | Computer Use (bash/text_editor) | `tool type ... is not supported for this model` |
 | Context Editing (message ID) | `messages.0.id: Extra inputs are not permitted` |
 | Tool Search | `tool_search ... not supported for this model` |
-| Fine-grained Tool Streaming (`eager_input_streaming`) | `Extra inputs are not permitted` |
+| Fine-grained Tool Streaming (`eager_input_streaming`) | ~~previously `Extra inputs are not permitted`~~ re-tested 2026-07-17: now works |
 | CountTokens | global-only deployment, no in-region ID, unavailable |
 | Mid-conversation system messages | `role 'system' is not supported` (4.8 supports it) |
 
@@ -102,7 +102,7 @@ Several features are not yet adapted for Opus 4.7 on Bedrock (the beta header is
 | PDF Support | ✅ | ✅ | ✅ | None | [test_08](test_08_pdf_support.py) |
 | Citations | ✅ | ✅ | ✅ | None | [test_09](test_09_citations.py) |
 | Structured Outputs (`output_config.format`) | ✅ | ✅ | ✅ | **4.6 gen only**; new-gen 400 | [test_10](test_10_structured_outputs.py) |
-| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | 4.6 series only; Opus 4.7 unavailable | [test_11](test_11_eager_input_streaming.py) |
+| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | 4.6 series + next-gen (Opus 4.7/4.8, Fable 5; re-tested 2026-07-17) | [test_11](test_11_eager_input_streaming.py) |
 | Compaction | ✅ | ✅ | ✅ | None | [test_12](test_12_compaction.py) |
 | Context Editing | ✅ | ✅ | ✅ | Opus 4.7 unavailable | [test_13](test_13_context_editing.py) |
 | Tool Search | ✅ | ❌ | ✅ | Invoke API only; Opus 4.7 unavailable | [test_14](test_14_tool_search.py) |
@@ -265,7 +265,7 @@ Streams tool-call parameters, cutting first-chunk latency (Bedrock buffers the w
 
 - **Anthropic**: [fine-grained-tool-streaming](https://docs.anthropic.com/en/agents-and-tools/tool-use/fine-grained-tool-streaming)
 - **Bedrock**: GA platform-wide, no beta header. Set `"eager_input_streaming": true` in tool definitions.
-- **Model compatibility**: `eager_input_streaming` is only supported on the Claude 4.6 series; Sonnet 4.5 and earlier, and Opus 4.7, return 400 (`Extra inputs are not permitted`). Sonnet 4.5 already streams fine-grained by default. Proxies should inject this field per model version.
+- **Model compatibility**: supported on the 4.6 series and next-gen models (Opus 4.7 / Opus 4.8 / Fable 5 — all verified streaming tool_use input on 2026-07-17; Opus 4.7 initially rejected the field but has since been fixed). Sonnet 4.5 and earlier return 400 (`Extra inputs are not permitted`); Sonnet 4.5 already streams fine-grained by default. Proxies should inject this field per model version.
 
 ### Compaction
 
