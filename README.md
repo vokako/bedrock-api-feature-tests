@@ -57,6 +57,7 @@ uv run python test_01_messages_basic.py
 | 21 | `test_21_claude47_changes.py` | Claude 4.7 Changes (breaking changes, thinking display, task budgets) | `task-budgets-2026-03-13` |
 | 22 | `test_22_fable5.py` | Claude Fable 5 feature compatibility (requires `provider_data_share`) | — |
 | 23 | `test_23_mid_conversation_system.py` | Mid-conversation system messages (Opus 4.8; works on Bedrock despite docs) | — |
+| 24 | `test_24_image_limits.py` | Image input limits (ceiling 600; non-deterministic 100-vs-600 band; safe limit 100) | — |
 
 ## Configuration
 

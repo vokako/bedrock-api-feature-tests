@@ -12,8 +12,8 @@
 
 This document walks through each Anthropic Messages API feature and its native support status on Amazon Bedrock, along with the behavioral differences between models. For Anthropic-specific features not built into Bedrock, it provides proxy-layer or application-layer implementation strategies.
 
-> 📌 **Verification method**: measured against Bedrock InvokeModel (runtime) and the Messages API (mantle). Every ✅ has a corresponding test script (`test_01`–`test_23`).
-> 📅 **Latest full re-verification**: 2026-07-03, covering Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5.
+> 📌 **Verification method**: measured against Bedrock InvokeModel (runtime) and the Messages API (mantle). Every ✅ has a corresponding test script (`test_01`–`test_24`).
+> 📅 **Latest full re-verification**: 2026-07-03, covering Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5. Image limits verified 2026-07-06.
 
 ## Table of Contents
 
@@ -98,7 +98,7 @@ Several features are not yet adapted for Opus 4.7 on Bedrock (the beta header is
 | Adaptive Thinking | ✅ | ✅ | ✅ | Haiku 4.5 has no effort | [test_16](test_16_adaptive_thinking.py) |
 | Interleaved Thinking | ✅ | ✅ | ✅ | None | [test_05](test_05_interleaved_thinking.py) |
 | Prompt Caching | ✅ | ✅ | ✅ | Min length varies by model | [test_06](test_06_prompt_caching.py) |
-| Vision | ✅ | ✅ | ✅ | None | [test_07](test_07_vision.py) |
+| Vision | ✅ | ✅ | ✅ | Ceiling 600/request; 101–600 non-deterministic (some backends cap at 100); reliable safe limit 100 | [test_07](test_07_vision.py) [test_24](test_24_image_limits.py) |
 | PDF Support | ✅ | ✅ | ✅ | None | [test_08](test_08_pdf_support.py) |
 | Citations | ✅ | ✅ | ✅ | None | [test_09](test_09_citations.py) |
 | Structured Outputs (`output_config.format`) | ✅ | ✅ | ✅ | **4.6 gen only**; new-gen 400 | [test_10](test_10_structured_outputs.py) |
@@ -209,6 +209,30 @@ Understand and analyze images.
 
 - **Anthropic**: [vision](https://docs.anthropic.com/en/build-with-claude/vision)
 - **Bedrock**: base64 image input (JPEG/PNG/GIF/WebP).
+
+> ⚠️ **Image count limit (complex, non-deterministic on Bedrock)**:
+>
+> Anthropic API docs specify: 100 images/request for 200k context models, 600 images/request for 1M context models. All current mainstream models on Bedrock have 1M context windows (Opus 4.8/4.7, Sonnet 5/4.6, Fable 5); only older models like Haiku 4.5 are 200k.
+>
+> Testing (2026-07-06, via `global.*` cross-region inference profiles) revealed three layers of behavior:
+>
+> 1. **Absolute ceiling = 600**. Sending 601 images is always rejected on every model: `ValidationException: too many images and documents: 601 + 0 > 600`. Matches the Anthropic docs.
+> 2. **Between 101–600: enforcement is non-deterministic**. The `global.*` profile routes requests across regional backends, and **some backends enforce a stricter 100-image cap**. The same 200-image request sometimes succeeds and sometimes fails with `too many images and documents: 200 + 0 > 100`. Measured on Sonnet 4.6 @200 images ×6: 4 successes, 2 `>100` rejections.
+> 3. **Some models (e.g. Opus 4.8) return transient `ServiceUnavailableException` (5xx)** for large multi-image requests; these succeed on retry — the 5xx is NOT the image-count limit, just server-side busyness.
+>
+> | Model | Context | Anthropic API Limit | Bedrock Absolute Ceiling | Bedrock Reliable Safe Limit |
+> |-------|---------|--------------------|------------------------|---------------------------|
+> | Opus 4.8 | 1M | 600 | 600 | **100** |
+> | Opus 4.7 | 1M | 600 | 600 | **100** |
+> | Sonnet 5 | 1M | 600 | 600 | **100** |
+> | Sonnet 4.6 | 1M | 600 | 600 | **100** |
+> | Fable 5 | 1M | 600 | 600 | **100** |
+>
+> **Practical guidance: keep requests to ≤100 images to succeed reliably on Bedrock.** 101–600 may work but can randomly hit a `>100` rejection or transient 5xx; 601+ is always rejected.
+>
+> Additionally, when a request contains more than 20 images, a stricter per-image dimension limit applies (max 2000px per side); otherwise returns `invalid_request_error`. Per-image size limit is **5 MB** (vs. 10 MB on direct Anthropic API).
+>
+> Verification: [test_24](test_24_image_limits.py) (tested 2026-07-06)
 
 ### PDF Support
 

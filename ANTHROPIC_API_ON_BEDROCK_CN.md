@@ -12,8 +12,8 @@
 
 本文档逐一梳理 Anthropic Messages API 的每个特性在 Amazon Bedrock 上的原生支持状态，并说明各模型之间的行为差异。对于 Bedrock 尚未内置的 Anthropic 特有特性，给出通过代理层或应用层自行实现的方案。
 
-> 📌 **验证方式**：基于 Bedrock InvokeModel（runtime）与 Messages API（mantle）实测。所有标注 ✅ 的特性均有对应测试脚本（`test_01`–`test_23`）。
-> 📅 **最近一次全模型复核**：2026-07-03，覆盖 Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5。
+> 📌 **验证方式**：基于 Bedrock InvokeModel（runtime）与 Messages API（mantle）实测。所有标注 ✅ 的特性均有对应测试脚本（`test_01`–`test_24`）。
+> 📅 **最近一次全模型复核**：2026-07-03，覆盖 Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5。图片限制复核 2026-07-06。
 
 ## 目录
 
@@ -98,7 +98,7 @@ Opus 4.7 有多个特性 Bedrock 侧尚未适配（beta header 被接受但带�
 | Adaptive Thinking | ✅ | ✅ | ✅ | Haiku 4.5 无 effort | [test_16](test_16_adaptive_thinking.py) |
 | Interleaved Thinking | ✅ | ✅ | ✅ | 无 | [test_05](test_05_interleaved_thinking.py) |
 | Prompt Caching | ✅ | ✅ | ✅ | 最小长度按模型不同 | [test_06](test_06_prompt_caching.py) |
-| Vision | ✅ | ✅ | ✅ | 无 | [test_07](test_07_vision.py) |
+| Vision | ✅ | ✅ | ✅ | 天花板 600 张/请求；101–600 非确定性（部分后端限 100），可靠安全值 100 | [test_07](test_07_vision.py) [test_24](test_24_image_limits.py) |
 | PDF Support | ✅ | ✅ | ✅ | 无 | [test_08](test_08_pdf_support.py) |
 | Citations | ✅ | ✅ | ✅ | 无 | [test_09](test_09_citations.py) |
 | Structured Outputs (`output_config.format`) | ✅ | ✅ | ✅ | **仅 4.6 一代**；新一代 400 | [test_10](test_10_structured_outputs.py) |
@@ -209,6 +209,30 @@ Claude 动态决定是否思考及思考深度，无需手动设 `budget_tokens`
 
 - **Anthropic**: [vision](https://docs.anthropic.com/en/build-with-claude/vision)
 - **Bedrock**: 支持 base64 图像输入（JPEG/PNG/GIF/WebP）。
+
+> ⚠️ **图片数量限制（在 Bedrock 上表现复杂，非确定性）**：
+>
+> Anthropic API 文档规定：200k 上下文模型限 100 张/请求，1M 上下文模型限 600 张/请求。当前 Bedrock 上所有主流模型均为 1M 上下文（Opus 4.8/4.7、Sonnet 5/4.6、Fable 5），只有 Haiku 4.5 等旧模型是 200k。
+>
+> 实测（2026-07-06，通过 `global.*` 跨区域推理配置）发现三层行为：
+>
+> 1. **绝对天花板 = 600**。所有模型发送 601 张必被拒：`ValidationException: too many images and documents: 601 + 0 > 600`。与 Anthropic 文档一致。
+> 2. **101–600 之间：执行非确定性**。`global.*` 会把请求路由到不同区域后端，**部分后端执行更严格的 100 张上限**，同一个 200 张请求有时成功、有时被拒 `too many images and documents: 200 + 0 > 100`。实测 Sonnet 4.6 @200 张 ×6 次：成功 4 次、`>100` 拒绝 2 次。
+> 3. **部分模型（如 Opus 4.8）对大批量多图请求返回瞬时 `ServiceUnavailableException`（5xx）**，重试可成功——这不是图片数量限制，只是服务端瞬时繁忙。
+>
+> | 模型 | 上下文 | Anthropic API 限制 | Bedrock 绝对天花板 | Bedrock 可靠安全上限 |
+> |------|--------|-------------------|-------------------|---------------------|
+> | Opus 4.8 | 1M | 600 | 600 | **100** |
+> | Opus 4.7 | 1M | 600 | 600 | **100** |
+> | Sonnet 5 | 1M | 600 | 600 | **100** |
+> | Sonnet 4.6 | 1M | 600 | 600 | **100** |
+> | Fable 5 | 1M | 600 | 600 | **100** |
+>
+> **实践建议：控制在 ≤100 张可在 Bedrock 上可靠成功**；101–600 张可能成功，但会随机遇到 `>100` 拒绝或瞬时 5xx；601+ 必被拒。
+>
+> 另外，超过 20 张图片时每张图片有更严格的尺寸限制（单边不超 2000px），否则报 `invalid_request_error`。单张图片大小限 **5 MB**（Anthropic API 为 10 MB）。
+>
+> 验证：[test_24](test_24_image_limits.py)（2026-07-06 实测）
 
 ### PDF Support
 
