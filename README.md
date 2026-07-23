@@ -1,16 +1,23 @@
-# Bedrock InvokeModel API Feature Tests
+# Bedrock API Feature Tests
 
-Verify Anthropic API features on Amazon Bedrock using InvokeModel / InvokeModelWithResponseStream API.
+Verify third-party model API features on Amazon Bedrock, organized into two parallel sections:
 
-📄 **Anthropic API on Bedrock Feature Guide**:
-- [中文版](ANTHROPIC_API_ON_BEDROCK_CN.md)
-- [English](ANTHROPIC_API_ON_BEDROCK_EN.md)
+- **`claude/`** — Anthropic API features via the `bedrock-runtime` **InvokeModel** API.
+- **`gpt/`** — OpenAI GPT-5.6 features via the `bedrock-mantle` **Responses** API.
+
+## Feature Guides
+
+| Provider | Guide |
+|----------|-------|
+| Anthropic (Claude) | [中文](ANTHROPIC_API_ON_BEDROCK_CN.md) · [English](ANTHROPIC_API_ON_BEDROCK_EN.md) |
+| OpenAI (GPT-5.6) | [中文](OPENAI_API_ON_BEDROCK_CN.md) · [English](OPENAI_API_ON_BEDROCK_EN.md) |
 
 ## Prerequisites
 
-- Python 3.12+
+- Python 3.12+ (`uv sync` to install deps: `boto3`, `anthropic`, `openai`)
 - AWS credentials configured (`~/.aws/credentials` or environment variables)
-- Access to `global.anthropic.claude-sonnet-4-6` in `us-east-1`
+- **Claude section**: access to `global.anthropic.claude-sonnet-4-6` in `us-east-1`
+- **OpenAI section**: a **Bedrock API key** in the `AWS_BEARER_TOKEN_BEDROCK` env var, and access to `openai.gpt-5.6-terra` on the `bedrock-mantle` endpoint in `us-east-1`
 
 ## Setup
 
@@ -18,55 +25,40 @@ Verify Anthropic API features on Amazon Bedrock using InvokeModel / InvokeModelW
 uv sync
 ```
 
-## Run all tests
+## Run
 
 ```bash
-uv run python run_all_tests.py
+# Claude section (24 tests, InvokeModel)
+uv run python claude/run_all_tests.py
+
+# OpenAI section (9 tests, Responses API)
+uv run python gpt/run_all_tests.py
+
+# A single test
+uv run python gpt/test_08_web_search.py
 ```
 
-## Run a single test
+## OpenAI (GPT-5.6) Test List
 
-```bash
-uv run python test_01_messages_basic.py
-```
+| # | Test | Feature | Result |
+|---|------|---------|:---:|
+| 01 | `test_01_basic.py` | Responses API basic | ✅ |
+| 02 | `test_02_streaming.py` | Streaming (SSE) | ✅ |
+| 03 | `test_03_tool_use.py` | Client-side tool use (function calling) | ✅ |
+| 04 | `test_04_reasoning.py` | Reasoning (effort control) | ✅ |
+| 05 | `test_05_structured_outputs.py` | Structured outputs (JSON schema) | ✅ |
+| 06 | `test_06_vision.py` | Vision (image input) | ✅ |
+| 07 | `test_07_prompt_caching.py` | Prompt caching | ✅ |
+| 08 | `test_08_web_search.py` | Web search (server-side hosted tool) | ❌ not functional |
+| 09 | `test_09_capability_matrix.py` | Capability double-check vs OpenAI compat table | ✅ |
 
-## Test List
+The three tiers (`openai.gpt-5.6-terra` / `-sol` / `-luna`) are configured in [`gpt/helpers.py`](gpt/helpers.py); Terra is the default. See the [OpenAI feature guide](OPENAI_API_ON_BEDROCK_EN.md) for details, especially [why web search does not work](OPENAI_API_ON_BEDROCK_EN.md#5-web-search--not-functional) and the [full capability double-check](OPENAI_API_ON_BEDROCK_EN.md#6-capability-double-check-vs-openais-table).
 
-| # | Test | Feature | Beta Header |
-|---|------|---------|-------------|
-| 01 | `test_01_messages_basic.py` | Messages API Basic | — |
-| 02 | `test_02_streaming.py` | Streaming (SSE) | — |
-| 03 | `test_03_tool_use.py` | Tool Use (Function Calling) | — |
-| 04 | `test_04_extended_thinking.py` | Extended Thinking | — |
-| 05 | `test_05_interleaved_thinking.py` | Interleaved Thinking | `interleaved-thinking-2025-05-14` |
-| 06 | `test_06_prompt_caching.py` | Prompt Caching | — |
-| 07 | `test_07_vision.py` | Vision (Multimodal Image) | — |
-| 08 | `test_08_pdf_support.py` | PDF Support | — |
-| 09 | `test_09_citations.py` | Citations | — |
-| 10 | `test_10_structured_outputs.py` | Structured Outputs | — |
-| 11 | `test_11_eager_input_streaming.py` | Fine-grained Tool Streaming | — (`eager_input_streaming` field) |
-| 12 | `test_12_compaction.py` | Compaction | `compact-2026-01-12` |
-| 13 | `test_13_context_editing.py` | Context Editing | `context-management-2025-06-27` |
-| 14 | `test_14_tool_search.py` | Tool Search | `tool-search-tool-2025-10-19` |
-| 15 | `test_15_tool_input_examples.py` | Tool Input Examples | `tool-examples-2025-10-29` |
-| 16 | `test_16_adaptive_thinking.py` | Adaptive Thinking | — (`thinking.type: "adaptive"` + `effort`) |
-| 17 | `test_17_bash_tool.py` | Bash Tool | `computer-use-2025-01-24` |
-| 18 | `test_18_text_editor_tool.py` | Text Editor Tool | `computer-use-2025-01-24` |
-| 19 | `test_19_claude46_changes.py` | Claude 4.6 Changes (prefill, output_config, deprecations) | — |
-| 20 | `test_20_count_tokens.py` | CountTokens API (in-region only) | — |
-| 21 | `test_21_claude47_changes.py` | Claude 4.7 Changes (breaking changes, thinking display, task budgets) | `task-budgets-2026-03-13` |
-| 22 | `test_22_fable5.py` | Claude Fable 5 feature compatibility (requires `provider_data_share`) | — |
-| 23 | `test_23_mid_conversation_system.py` | Mid-conversation system messages (Opus 4.8; works on Bedrock despite docs) | — |
-| 24 | `test_24_image_limits.py` | Image input limits (ceiling 600; non-deterministic 100-vs-600 band; safe limit 100) | — |
+## Claude Test List
+
+24 tests (`claude/test_01`–`test_24`) covering the Anthropic Messages API on Bedrock — Messages, streaming, tool use, thinking, prompt caching, vision, PDF, citations, structured outputs, computer-use tools, and version-specific changes. See the [Anthropic feature guide](ANTHROPIC_API_ON_BEDROCK_EN.md).
 
 ## Configuration
 
-Edit `helpers.py` to change:
-- `REGION` — AWS region (default: `us-east-1`)
-- `MODEL_ID` — Bedrock model ID (default: `global.anthropic.claude-sonnet-4-6`)
-
-## Documentation
-
-- [ANTHROPIC_API_ON_BEDROCK_CN.md](ANTHROPIC_API_ON_BEDROCK_CN.md) — 中文版：Anthropic API 各特性在 Bedrock 上的支持情况
-- [ANTHROPIC_API_ON_BEDROCK_EN.md](ANTHROPIC_API_ON_BEDROCK_EN.md) — English: Anthropic API Feature Compatibility on Amazon Bedrock
-- [FABLE5_USAGE_CN.md](FABLE5_USAGE_CN.md) — 中文版：Claude Fable 5 使用说明（含 data retention / provider_data_share 开启步骤）
+- Claude: edit `claude/helpers.py` (`REGION`, `MODEL_ID`).
+- OpenAI: edit `gpt/helpers.py` (`REGION`, `MODEL_ID` = `TERRA`/`SOL`/`LUNA`).

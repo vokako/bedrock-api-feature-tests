@@ -7,4 +7,5 @@ dependencies = [
     "anthropic>=0.96.0",
     "boto3",
     "botocore>=1.43.26",
+    "openai>=2.47.0",
 ]
