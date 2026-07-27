@@ -8,23 +8,29 @@ import time
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 tests = sorted(f for f in os.listdir(SCRIPT_DIR) if f.startswith("test_") and f.endswith(".py"))
 
+# Multi-model sweeps legitimately take minutes; the default cap is for single tests.
+SLOW_TESTS = {"test_24_image_limits.py", "test_25_cross_model_matrix.py"}
+DEFAULT_TIMEOUT = 120
+SLOW_TIMEOUT = 900
+
 print(f"Running {len(tests)} feature tests against Bedrock InvokeModel API...")
 print(f"Model: global.anthropic.claude-sonnet-4-6 | Region: us-east-1\n")
 
 results = []
 for t in tests:
     path = os.path.join(SCRIPT_DIR, t)
+    timeout = SLOW_TIMEOUT if t in SLOW_TESTS else DEFAULT_TIMEOUT
     start = time.time()
     try:
         proc = subprocess.run(
             [sys.executable, path],
             capture_output=True, text=True,
             cwd=SCRIPT_DIR,
-            timeout=120,
+            timeout=timeout,
         )
         output = proc.stdout + proc.stderr
     except subprocess.TimeoutExpired:
-        output = f"  ❌ FAIL: {t} — timeout (120s)"
+        output = f"  ❌ FAIL: {t} — timeout ({timeout}s)"
     elapsed = time.time() - start
     passed = "✅ PASS" in output
     results.append((t, passed, elapsed))

@@ -28,7 +28,7 @@ uv sync
 ## Run
 
 ```bash
-# Claude section (24 tests, InvokeModel)
+# Claude section (25 tests, InvokeModel)
 uv run python claude/run_all_tests.py
 
 # OpenAI section (9 tests, Responses API)
@@ -49,14 +49,22 @@ uv run python gpt/test_08_web_search.py
 | 05 | `test_05_structured_outputs.py` | Structured outputs (JSON schema) | ✅ |
 | 06 | `test_06_vision.py` | Vision (image input) | ✅ |
 | 07 | `test_07_prompt_caching.py` | Prompt caching | ✅ |
-| 08 | `test_08_web_search.py` | Web search (server-side hosted tool) | ❌ not functional |
+| 08 | `test_08_web_search.py` | Web search (server-side hosted tool) | ✅ needs `bedrock-websearch:*` ¹ |
 | 09 | `test_09_capability_matrix.py` | Capability double-check vs OpenAI compat table | ✅ |
 
-The three tiers (`openai.gpt-5.6-terra` / `-sol` / `-luna`) are configured in [`gpt/helpers.py`](gpt/helpers.py); Terra is the default. See the [OpenAI feature guide](OPENAI_API_ON_BEDROCK_EN.md) for details, especially [why web search does not work](OPENAI_API_ON_BEDROCK_EN.md#5-web-search--not-functional) and the [full capability double-check](OPENAI_API_ON_BEDROCK_EN.md#6-capability-double-check-vs-openais-table).
+¹ Web search **works**, but only if the calling identity holds `bedrock-websearch:*`. Without it the call returns HTTP 200 with `web_search_call.status="failed"` and no `AccessDenied` — a silent failure that looks like the feature is unsupported. Neither `AmazonBedrockLimitedAccess` (the default for Bedrock API key users) nor `AmazonBedrockFullAccess` grants it.
+
+The three tiers (`openai.gpt-5.6-terra` / `-sol` / `-luna`) are configured in [`gpt/helpers.py`](gpt/helpers.py); Terra is the default. See the [OpenAI feature guide](OPENAI_API_ON_BEDROCK_EN.md) for details, especially [the web search IAM permission trap](OPENAI_API_ON_BEDROCK_EN.md#5-web-search--works-but-gated-by-an-iam-permission) and the [full capability double-check](OPENAI_API_ON_BEDROCK_EN.md#6-capability-double-check-vs-openais-table).
 
 ## Claude Test List
 
-24 tests (`claude/test_01`–`test_24`) covering the Anthropic Messages API on Bedrock — Messages, streaming, tool use, thinking, prompt caching, vision, PDF, citations, structured outputs, computer-use tools, and version-specific changes. See the [Anthropic feature guide](ANTHROPIC_API_ON_BEDROCK_EN.md).
+25 tests (`claude/test_01`–`test_25`) covering the Anthropic Messages API on Bedrock — Messages, streaming, tool use, thinking, prompt caching, vision, PDF, citations, structured outputs, computer-use tools, and version-specific changes. `test_25` is a cross-model feature matrix covering **Claude Opus 5** (released 2026-07-24) through Haiku 4.5. See the [Anthropic feature guide](ANTHROPIC_API_ON_BEDROCK_EN.md).
+
+Known environment-dependent results:
+
+- `test_20_count_tokens` needs the `bedrock:CountTokens` IAM permission, which the default Bedrock API key user lacks. Note CountTokens is also genuinely unsupported on `bedrock-runtime` for Opus 5 / Sonnet 5 / Opus 4.8 (it does work for them on `bedrock-mantle`).
+- `test_24_image_limits` and `test_25_cross_model_matrix` are multi-minute sweeps; the runner allows them 900s.
+- **Claude cannot use web search on Bedrock at all** — the `web_search_20250305` tool type is rejected at validation on every model and on both endpoints, regardless of permissions.
 
 ## Configuration
 

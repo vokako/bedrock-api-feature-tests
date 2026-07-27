@@ -21,7 +21,7 @@
 - [二、访问方式与鉴权](#二访问方式与鉴权)
 - [三、特性总览表](#三特性总览表)
 - [四、已支持特性（详解）](#四已支持特性详解)
-- [五、Web Search —— 不可用](#五web-search--不可用)
+- [五、Web Search —— 可用，但被 IAM 权限门禁](#五web-search--可用但被一个-iam-权限门禁)
 - [六、对照 OpenAI 官方表的能力复核](#六对照-openai-官方表的能力复核)
 
 ---
@@ -85,7 +85,7 @@ print(resp.output_text)
 | 会话状态 | ✅ | [`test_09`](gpt/test_09_capability_matrix.py) | `previous_response_id` 能回忆上一轮 |
 | 推理 effort `max` | ✅ | [`test_09`](gpt/test_09_capability_matrix.py) | `reasoning={"effort":"max"}` 被接受 |
 | 客户端 `tool_search` | ✅ | [`test_09`](gpt/test_09_capability_matrix.py) | 工具类型被接受 |
-| **Web Search（托管工具）** | ❌ | [`test_08`](gpt/test_08_web_search.py) | 被接受，但每次 `web_search_call` 都 `status="failed"` |
+| **Web Search（托管工具）** | ✅¹ | [`test_08`](gpt/test_08_web_search.py) | ¹需 `bedrock-websearch:*` 权限；缺权限会**静默失败**（见[第五节](#五web-search--可用但被一个-iam-权限门禁)） |
 | 其他托管工具（file_search / image_generation / code_interpreter / computer_use / shell） | ❌ | [`test_09`](gpt/test_09_capability_matrix.py) | 直接 **400** "tool type not supported" |
 | 远程 MCP（`server_url`）/ 非 Standard 服务档位 | ❌ | [`test_09`](gpt/test_09_capability_matrix.py) | **400**；须用 connector ARN / 仅 on-demand |
 | 服务端自定义工具 —— Lambda / AgentCore Gateway（`mcp` + connector ARN） | ➖ | — | 文档称支持；此处未测（需部署 Lambda/Gateway） |
@@ -119,34 +119,48 @@ print(resp.output_text)
 
 ---
 
-## 五、Web Search —— 不可用
+## 五、Web Search —— 可用，但被一个 IAM 权限门禁
 
-**结论：OpenAI 内置的 `web_search` 托管工具会被 API 接受，模型也会主动尝试调用，但搜索从不真正执行 —— 每次 `web_search_call` 都返回 `status="failed"`。**
+**结论：GPT-5.6 在 Bedrock 上的 hosted `web_search` 是可用的。它被 `bedrock-websearch:*` 这个 IAM 权限门禁；缺少该权限时工具会*静默失败*，极易误判为"不支持"。**
 
-实测情况（Terra @ us-east-1；另测 Sol @ us-east-1 和 us-east-2）：
+### 需要的权限
 
-- 带 `tools=[{"type":"web_search"}]`（以及 `web_search_preview`）的请求被接受 —— **不报校验错误**。
-- 模型会规划真实查询词并在输出里产出 `web_search_call` 项（例如 `NVDA stock price NVIDIA current quote Nasdaq`）。
-- 每个 `web_search_call` 的 `status` 都是 `"failed"`。随后模型拒绝回答时效性问题，称 "web search is temporarily unavailable"，通常只给一个手动链接。
-- 换两种工具名、换两档模型、换两个区域，结果一致 —— 不是偶发抖动。
+```json
+{"Effect": "Allow", "Action": "bedrock-websearch:*", "Resource": "*"}
+```
 
-**这一点由 OpenAI 官方文档坐实 —— 是设计上"不可用"，不是 bug、也不是请求写法问题。** OpenAI 的 [OpenAI models in Amazon Bedrock](https://developers.openai.com/api/docs/guides/amazon-bedrock) 指南（功能可用性截至 **2026-07-13**，即上线当天）列明 **Hosted web search → Not available**（在 Amazon Bedrock 上不可用），同列的还有 hosted file search、computer use、shell、image-generation tool、remote MCP servers。文档原文：
+**`AmazonBedrockLimitedAccess`**（控制台生成 API key 时默认挂的策略）和 **`AmazonBedrockFullAccess`** 都**不含**它。`bedrock-websearch` 是一个独立的服务命名空间——不被 `bedrock:*` 或 `bedrock-mantle:*` 覆盖，也不在 botocore 的服务列表里。
 
-> *"Hosted tools run through OpenAI-operated service infrastructure and are unavailable on Amazon Bedrock."*
+2026-07-27 实测（`openai.gpt-5.6-terra` @ `us-east-1`，同一个 API key，只改 IAM 策略）：
 
-也就是说：工具类型能通过 API 校验（OpenAI 兼容层），模型也会规划搜索，但回到 OpenAI 搜索基础设施的执行链路在 Bedrock 上根本不存在 —— 所以恒为 `failed`。
+| 主体权限 | `web_search_call` 结果 |
+|---|---|
+| `AmazonBedrockLimitedAccess`（API key 默认） | `failed`，0 引用 ❌ |
+| `AmazonBedrockFullAccess` | `failed` ❌ |
+| `BedrockAgentCoreFullAccess` / `bedrock-agentcore:*` | `failed` ❌ |
+| `bedrock:*` + `bedrock-mantle:*` | `failed` ❌ |
+| **+ `bedrock-websearch:*`** | **`completed`，返回真实引用 ✅** |
+| `AdministratorAccess`（`Action:"*"`） | `completed` ✅ |
 
-**为什么模型卡片仍写 "Server-side tool calling ✅"：** 那指的是 Bedrock 自家的服务端工具编排（通过 `mcp` 工具类型注册的自定义 **Lambda** / **AgentCore Gateway** 工具，以及 gpt-oss 模型上内置的 `notes`/`tasks` 工具），**并不等于** OpenAI 的托管 `web_search` 工具在 `bedrock-mantle` 上接通了。AWS 的服务端工具文档从未列出 `web_search`。
+补上权限后模型返回真实数据，例如 *"NVDA is currently $206.84 USD per share"*，引用 `investor.nvidia.com`。
 
-**在 Bedrock 上同样标记为 "Not available" 的其他托管工具**（据 OpenAI 指南）：hosted file search、computer use、shell、image-generation tool、remote MCP servers、programmatic tool calling、multi-agent、pro mode。**可用的**：function calling、客户端 `tool_search`、自定义（Lambda/Gateway）工具、结构化输出、图片输入、流式、prompt caching、reasoning effort。
+### 静默失败这个坑
 
-**一句话：** 目前 GPT-5.6 在 Bedrock 上没有可用的 web search。若需联网结果，请自行做检索再作为上下文喂入，或通过 Lambda/AgentCore Gateway 注册自定义搜索工具。`test_08` 每次运行都会重新检查，一旦 AWS 接通后端就会自动变 ✅。
+缺少 `bedrock-websearch:*` 时，API 返回 **HTTP 200**，模型也会规划真实查询并产出 `web_search_call`（含 `search` 与 `open_page` 两种动作）——但每个 `status` 都是 `"failed"`，没有引用，模型还会说"web search 暂时不可用"。**全程没有 `AccessDenied`**，响应里没有任何迹象指向权限问题。
+
+### 补充说明
+
+- **鉴权机制本身无关**：Bedrock API key（bearer）与 SigV4 行为完全一致，起作用的是背后身份的权限。API key 解码后是一个专用 IAM 用户（`BedrockAPIKey-<后缀>`），默认挂 `AmazonBedrockLimitedAccess`——这就是 bearer 路径看起来"坏掉"的原因。
+- OpenAI 的[兼容性指南](https://developers.openai.com/api/docs/guides/amazon-bedrock)把 Bedrock 上的 "Hosted web search" 标为 Not available（截至 2026-07-13 上线）。**该表已过时／未考虑权限因素**——实测可用。
+- `bedrock-websearch` 下的确切动作名未公开，实用做法就是 `bedrock-websearch:*`。（`Search`、`InvokeWebSearch`、`WebSearch`、`OpenPage`、`Retrieve`、`Query`、`Fetch`、`GetPage`、`Browse`、`PerformSearch` 均已逐个测试，都不是。）
+- 其他托管工具（`file_search`、`image_generation`、`code_interpreter`、`computer_use_preview`、`shell`、`server_url` 形式的远程 MCP）是真的不支持——它们在 schema 校验层就 **400 硬拒**，与权限无关。见[第六节](#六对照-openai-官方表的能力复核)。
+- **Claude 在 Bedrock 上完全无法使用 web search**——Anthropic 的 `web_search_20250305` 工具类型在 `bedrock-runtime` 和 `bedrock-mantle` 上都被校验层拒绝，权限给满也一样。见 [Anthropic 指南](ANTHROPIC_API_ON_BEDROCK_CN.md)。
 
 ---
 
 ## 六、对照 OpenAI 官方表的能力复核
 
-对照 OpenAI [OpenAI models in Amazon Bedrock](https://developers.openai.com/api/docs/guides/amazon-bedrock) 特性表（截至 2026-07-13 上线）里的每一项，直接对 `us-east-1` 的 `openai.gpt-5.6-terra` 实测。所有官方结论均吻合，汇总在 [`test_09`](gpt/test_09_capability_matrix.py)。
+对照 OpenAI [OpenAI models in Amazon Bedrock](https://developers.openai.com/api/docs/guides/amazon-bedrock) 特性表（截至 2026-07-13 上线）里的每一项，直接对 `us-east-1` 的 `openai.gpt-5.6-terra` 实测。除 hosted web search 外所有官方结论均吻合（web search 补上 `bedrock-websearch:*` 后可用，见第五节），汇总在 [`test_09`](gpt/test_09_capability_matrix.py)。
 
 | OpenAI 文档能力 | 文档 → Bedrock | 实测行为 | 吻合 |
 |-----------------|:---:|---------|:---:|
@@ -163,7 +177,7 @@ print(resp.output_text)
 | 自定义工具（Lambda / AgentCore connector） | Available | `mcp`+connector ARN 是唯一被接受的 MCP 形式 | ✅（未完整跑通） |
 | 音频输入 / WebSocket / Pro mode / Multi-agent / Programmatic tool calling | Not available | 未测（无干净探针） | ➖ |
 | 服务档位 | 仅 on-demand | `service_tier="flex"` → **400** | ✅ |
-| Hosted web search | Not available | 被接受，`web_search_call` → **failed** | ✅ |
+| Hosted web search | Not available | 给了 `bedrock-websearch:*` 就**可用**；否则静默 `failed` | ❌ 官方表已过时 |
 | Hosted file search | Not available | **400** tool type not supported | ✅ |
 | Image generation tool | Not available | **400** tool type not supported | ✅ |
 | Code interpreter | Not available | **400** tool type not supported | ✅ |
@@ -173,7 +187,7 @@ print(resp.output_text)
 
 ### 表格没写出的两个细节
 
-1. **"不可用"分两种。** `web_search` / `web_search_preview` 是*校验层接受*、模型也主动调用，只在*执行时*失败（`status="failed"`）。其余所有托管工具（`file_search`、`image_generation`、`code_interpreter`、`computer_use_preview`、`shell`）是*推理前就 400 硬拒*。web search 是唯一的"半接通"特例。
+1. **web search 在 OpenAI 表里被标错了，而且失败方式是个陷阱。** `web_search` / `web_search_preview` 在校验层被接受，并且**确实能用**——前提是调用方持有 `bedrock-websearch:*`。缺该权限时它们在执行阶段失败（`status="failed"`）且**不报 AccessDenied**，看起来与"不支持"一模一样。其余托管工具（`file_search`、`image_generation`、`code_interpreter`、`computer_use_preview`、`shell`）是推理前就 **400 硬拒**——那些才是真不支持，且与权限无关。
 
 2. **API 会自己报出支持的工具类型白名单。** 400 报错原文：*"Supported tool types are: `function`, `mcp`, `custom`, `namespace`, `tool_search`."* 注意 `web_search` **不在**这个列表里（与"不可用"一致），却被接受而非拒绝，前后不一致。`namespace` 则是 OpenAI 表里压根没提的一个受支持类型。
 

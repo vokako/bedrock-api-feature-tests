@@ -6,9 +6,12 @@ feature table (as of the 2026-07-13 launch).
 
 Key findings encoded here:
   - Unsupported hosted tools (file_search, image_generation, code_interpreter,
-    computer_use_preview, shell) are HARD-REJECTED with 400.
-  - `web_search` is the odd one out: ACCEPTED at validation, but its
-    web_search_call executes with status="failed" (see test_08).
+    computer_use_preview, shell) are HARD-REJECTED with 400. This is schema-level
+    and therefore permission-independent.
+  - `web_search` is the odd one out: always ACCEPTED at validation. Whether it
+    actually executes depends on the caller holding `bedrock-websearch:*`
+    (see test_08). OpenAI's compat table lists hosted web search as "Not
+    available" on Bedrock, but that is out of date — it works given the perm.
   - Supported tool types reported by the API: function, mcp, custom, namespace,
     tool_search.
   - service_tier other than on-demand -> 400 (on-demand only on Bedrock).
@@ -63,12 +66,17 @@ try:
     print(f"  remote MCP server_url: {'400 rejected ✓' if ok else 'NOT rejected ✗'}")
     results.append(ok)
 
-    # 3. web_search is accepted (no 400) but soft-fails — the documented odd case.
+    # 3. web_search is accepted (never a 400) — whether it EXECUTES depends on the
+    #    caller holding `bedrock-websearch:*` (see test_08). Here we only assert the
+    #    tool type is accepted, so this test is permission-independent.
     r = create(tools=[{"type": "web_search"}], tool_choice="required",
                input="current NVDA price? cite url")
     ws = [o.status for o in r.output if getattr(o, "type", "") == "web_search_call"]
-    ok = len(ws) > 0 and all(s == "failed" for s in ws)
-    print(f"  web_search: accepted, statuses={ws} {'(soft-fail as documented) ✓' if ok else '✗'}")
+    ok = len(ws) > 0
+    executed = any(s == "completed" for s in ws)
+    print(f"  web_search: accepted, statuses={ws} "
+          f"({'executed — perms OK' if executed else 'not executed — needs bedrock-websearch:*'})"
+          f" {'✓' if ok else '✗'}")
     results.append(ok)
 
     # 4. tool_search accepted.

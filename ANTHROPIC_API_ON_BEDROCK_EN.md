@@ -33,6 +33,7 @@ This document walks through each Anthropic Messages API feature and its native s
 
 | Model | Invoke (runtime) model ID | Notes |
 |-------|--------------------------|-------|
+| Claude Opus 5 | `global.anthropic.claude-opus-5` | Released 2026-07-24. **1M context / 128k output**, knowledge cutoff May 2026. In-Region ID is N/A by design — use `global.`/`us.`. Behaves as new-gen. |
 | Claude Sonnet 5 | `global.anthropic.claude-sonnet-5` | Released 2026-06-30, most agentic Sonnet, 1M context / 128k output |
 | Claude Fable 5 | `global.anthropic.claude-fable-5` | Mythos-class, requires `provider_data_share` retention (see [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md)) |
 | Claude Opus 4.8 | `global.anthropic.claude-opus-4-8` | drop-in replacement for 4.7 |
@@ -41,22 +42,43 @@ This document walks through each Anthropic Messages API feature and its native s
 | Claude Sonnet 4.6 | `global.anthropic.claude-sonnet-4-6` | |
 | Claude Haiku 4.5 | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | |
 
-### Cross-model behavior matrix (measured 2026-07-03, all via runtime)
+### Cross-model behavior matrix (measured 2026-07-03; Opus 5 column + re-verification 2026-07-27, all via runtime)
 
-**Key takeaway: models split into a "new generation" (Sonnet 5 / Fable 5 / Opus 4.8 / 4.7) and the "4.6 generation" (Opus 4.6 / Sonnet 4.6 / Haiku 4.5).**
+**Key takeaway: models split into a "new generation" (Opus 5 / Sonnet 5 / Fable 5 / Opus 4.8 / 4.7) and the "4.6 generation" (Opus 4.6 / Sonnet 4.6 / Haiku 4.5).**
 
-| Feature | Sonnet 5 | Fable 5 | Opus 4.8 | Opus 4.7 | Opus 4.6 | Sonnet 4.6 | Haiku 4.5 |
-|---------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| Basic invocation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Adaptive Thinking (`type:"adaptive"`+`effort`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ no `effort` |
-| Legacy Thinking (`type:"enabled"`+`budget_tokens`) | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
-| Sampling params `temperature`/`top_p`/`top_k` | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
-| Structured Outputs (`output_config.format`) | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
-| Mid-conversation System Messages (`role:system`) | ✅ | ✅ | ✅ | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 |
-| Assistant Prefill | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| Min cacheable prompt length (model-card value) | 4,096 | 1,024 | 4,096 | 4,096 | 4,096 | 1,024 | 4,096 |
+| Feature | Opus 5 | Sonnet 5 | Fable 5 | Opus 4.8 | Opus 4.7 | Opus 4.6 | Sonnet 4.6 | Haiku 4.5 |
+|---------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Basic invocation | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Adaptive Thinking (`type:"adaptive"`+`effort`) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ no `effort` |
+| Legacy Thinking (`type:"enabled"`+`budget_tokens`) | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
+| Sampling params `temperature`/`top_p`/`top_k` | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
+| Structured Outputs (`output_config.format`) | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
+| Mid-conversation System Messages (`role:system`) | ✅ | ✅ | ✅ | ✅ | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 |
+| Assistant Prefill | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Min cacheable prompt length (model-card value) | **512** | 4,096 | 1,024 | 4,096 | 4,096 | 4,096 | 1,024 | 4,096 |
 
-Values from each model's AWS model card ("Min tokens per cache checkpoint", authoritative). Rule: **only Fable 5 and Sonnet 4.6 are 1,024; all others (Sonnet 5, Opus 4.6/4.7/4.8, Haiku 4.5) are 4,096**. Below this length, `cache_control` does nothing.
+Values from each model's AWS model card ("Min tokens per cache checkpoint", authoritative). Rule: **Opus 5 is 512 (the lowest yet), Fable 5 and Sonnet 4.6 are 1,024, and the rest (Sonnet 5, Opus 4.6/4.7/4.8, Haiku 4.5) are 4,096**. Opus 5's 512 threshold was confirmed empirically: a 466-token prefix produced `cache_creation_input_tokens=0`, a 608-token prefix produced 608. Below this length, `cache_control` does nothing.
+
+### Web search is not available on any Claude model (measured 2026-07-27)
+
+Anthropic's native `web_search_20250305` server tool is **rejected at validation** on Bedrock, on every model tested (Opus 5 / Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5) and on **both** access paths:
+
+- `bedrock-runtime` InvokeModel — new-gen returns `tool type 'web_search_20250305' is not supported for this model`; the 4.6 generation returns `Input tag 'web_search_20250305' ... does not match any of the expected tags`, whose message enumerates the full allow-list: `bash_20250124`, `custom`, `memory_20250818`, `text_editor_20250124/20250429/20250728`, `tool_search_tool_bm25(_20251119)`, `tool_search_tool_regex(_20251119)`.
+- `bedrock-mantle` `/anthropic/v1/messages` (Opus 5 / Opus 4.8 / Sonnet 5) — same `not supported for this model` rejection.
+
+This is a **schema-level rejection and therefore permission-independent**: it still fails with `AdministratorAccess` and with `bedrock-websearch:*` granted. That contrasts with GPT-5.6, where hosted web search does work once `bedrock-websearch:*` is present — see the [OpenAI guide](OPENAI_API_ON_BEDROCK_EN.md#5-web-search--works-but-gated-by-an-iam-permission). To give Claude web results on Bedrock you must do your own retrieval and pass it in as context.
+
+### Opus 5 specifics (measured 2026-07-27)
+
+- **Model IDs**: runtime requires `global.anthropic.claude-opus-5` (or `us.`); the bare in-region `anthropic.claude-opus-5` raises `ValidationException`. On `bedrock-mantle` use the in-region form `anthropic.claude-opus-5` at `/anthropic/v1/messages` (and `anthropic_version` is required there).
+- **Works**: adaptive thinking, interleaved thinking + tool use, streaming, vision, PDF input, tool use, citations, prompt caching, bash / text_editor / memory tools, `tool_search`, mid-conversation system messages, `eager_input_streaming` (inside the tool definition), context editing + compaction + `input_examples` (each with its beta header), and the 1M-context beta header is accepted.
+- **Rejected**: legacy `thinking.type:"enabled"`, `temperature` (`deprecated for this model`), `output_config.format`, assistant prefill, `web_search_20250305`.
+- **CountTokens differs by endpoint.** On `bedrock-runtime` it is **unsupported** for Opus 5 / Sonnet 5 / Opus 4.8 (`The provided model doesn't support counting tokens.`, confirmed under admin credentials, so not a permission issue) — the model card lists Count tokens as not supported on runtime. On **`bedrock-mantle` it works**: `POST /anthropic/v1/messages/count_tokens` with `anthropic_version` returned `{"input_tokens": 11}` for Opus 5. On runtime, Sonnet 4.6 does support it, using an **in-region** model ID and with `max_tokens` present in the counted body.
+- **Prompt caching minimum is 512 tokens** (model card), the lowest of any Claude on Bedrock; 4 checkpoints max, 5-minute and 1-hour TTLs, on `system`/`messages`/`tools`.
+- **Adaptive thinking is on by default**; per the model card it can be disabled, but then effort is capped at `high`.
+- **Computer use** on Opus 5 uses tool type `computer_20251124` with beta header `computer-use-2025-11-24`.
+- **APIs**: `Invoke`, `Converse` and `Messages` are supported; `Responses` and `Chat Completions` are not. Service tiers: Standard and Batch only.
+- **Not on mantle**: `anthropic.claude-sonnet-4-6` and `anthropic.claude-opus-4-6-v1` return 404 there; Opus 5 / Opus 4.8 / Sonnet 5 are available.
 
 ### Key differences
 

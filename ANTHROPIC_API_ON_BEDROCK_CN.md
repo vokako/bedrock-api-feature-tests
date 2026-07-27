@@ -33,6 +33,7 @@
 
 | 模型 | Invoke（runtime）model ID | 说明 |
 |------|--------------------------|------|
+| Claude Opus 5 | `global.anthropic.claude-opus-5` | 2026-07-24 发布。**1M 上下文 / 128k 输出**，知识截止 2026-05。官方 In-Region ID 为 N/A，必须用 `global.`/`us.`。行为属新一代。 |
 | Claude Sonnet 5 | `global.anthropic.claude-sonnet-5` | 2026-06-30 发布，最强 agentic Sonnet，1M 上下文 / 128k 输出 |
 | Claude Fable 5 | `global.anthropic.claude-fable-5` | Mythos 级，强制 `provider_data_share` 数据保留（见 [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md)） |
 | Claude Opus 4.8 | `global.anthropic.claude-opus-4-8` | drop-in 替换 4.7 |
@@ -41,22 +42,43 @@
 | Claude Sonnet 4.6 | `global.anthropic.claude-sonnet-4-6` | |
 | Claude Haiku 4.5 | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | |
 
-### 跨模型行为矩阵（2026-07-03 全 runtime 实测）
+### 跨模型行为矩阵（2026-07-03 实测；Opus 5 列与复核为 2026-07-27，全 runtime）
 
-**关键结论：模型明显分成"新一代"（Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）与"4.6 一代"（Opus 4.6 / Sonnet 4.6 / Haiku 4.5）两种行为。**
+**关键结论：模型明显分成"新一代"（Opus 5 / Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）与"4.6 一代"（Opus 4.6 / Sonnet 4.6 / Haiku 4.5）两种行为。**
 
-| 特性 | Sonnet 5 | Fable 5 | Opus 4.8 | Opus 4.7 | Opus 4.6 | Sonnet 4.6 | Haiku 4.5 |
-|------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| 基础调用 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Adaptive Thinking（`type:"adaptive"`+`effort`） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ 不支持 `effort` |
-| 旧版 Thinking（`type:"enabled"`+`budget_tokens`） | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
-| 采样参数 `temperature`/`top_p`/`top_k` | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
-| Structured Outputs（`output_config.format`） | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
-| Mid-conversation System Messages（`role:system`） | ✅ | ✅ | ✅ | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 |
-| Assistant Prefill | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| 最小可缓存长度（模型卡片官方值） | 4,096 | 1,024 | 4,096 | 4,096 | 4,096 | 1,024 | 4,096 |
+| 特性 | Opus 5 | Sonnet 5 | Fable 5 | Opus 4.8 | Opus 4.7 | Opus 4.6 | Sonnet 4.6 | Haiku 4.5 |
+|------|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 基础调用 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Adaptive Thinking（`type:"adaptive"`+`effort`） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ 不支持 `effort` |
+| 旧版 Thinking（`type:"enabled"`+`budget_tokens`） | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
+| 采样参数 `temperature`/`top_p`/`top_k` | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
+| Structured Outputs（`output_config.format`） | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 | ✅ | ✅ | ✅ |
+| Mid-conversation System Messages（`role:system`） | ✅ | ✅ | ✅ | ✅ | ❌ 400 | ❌ 400 | ❌ 400 | ❌ 400 |
+| Assistant Prefill | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| 最小可缓存长度（模型卡片官方值） | **512** | 1,024 | 4,096 | 4,096 | 4,096 | 1,024 | 4,096 |
 
-数值取自各模型的 AWS 模型卡片 "Min tokens per cache checkpoint"（权威来源）。规律：**仅 Fable 5 和 Sonnet 4.6 为 1,024，其余（Sonnet 5、Opus 4.6/4.7/4.8、Haiku 4.5）均为 4,096**。低于该长度即使设 `cache_control` 也不会缓存。
+数值取自各模型的 AWS 模型卡片 "Min tokens per cache checkpoint"（权威来源）。规律：**Opus 5 为 512（目前最低），Fable 5 与 Sonnet 4.6 为 1,024，其余（Sonnet 5、Opus 4.6/4.7/4.8、Haiku 4.5）均为 4,096**。Opus 5 的 512 门槛已实测确认：466 token 前缀 `cache_creation_input_tokens=0`，608 token 前缀为 608。低于该长度即使设 `cache_control` 也不会缓存。
+
+### 所有 Claude 模型都不支持 web search（2026-07-27 实测）
+
+Anthropic 原生的 `web_search_20250305` 服务端工具在 Bedrock 上**于校验层被拒**，实测覆盖全部模型（Opus 5 / Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5）与**两条**访问路径：
+
+- `bedrock-runtime` InvokeModel —— 新一代报 `tool type 'web_search_20250305' is not supported for this model`；4.6 一代报 `Input tag 'web_search_20250305' ... does not match any of the expected tags`，该报错还列出了完整白名单：`bash_20250124`、`custom`、`memory_20250818`、`text_editor_20250124/20250429/20250728`、`tool_search_tool_bm25(_20251119)`、`tool_search_tool_regex(_20251119)`。
+- `bedrock-mantle` 的 `/anthropic/v1/messages`（Opus 5 / Opus 4.8 / Sonnet 5）—— 同样返回 `not supported for this model`。
+
+这是 **schema 层拒绝，与权限无关**：用 `AdministratorAccess`、并已授予 `bedrock-websearch:*` 时依然失败。这与 GPT-5.6 形成对比——后者补上 `bedrock-websearch:*` 后 hosted web search 确实可用，见 [OpenAI 指南](OPENAI_API_ON_BEDROCK_CN.md#五web-search--可用但被一个-iam-权限门禁)。要让 Claude 在 Bedrock 上获得联网信息，只能自行检索后作为上下文传入。
+
+### Opus 5 要点（2026-07-27 实测）
+
+- **Model ID**：runtime 必须用 `global.anthropic.claude-opus-5`（或 `us.`）；裸 in-region 的 `anthropic.claude-opus-5` 会 `ValidationException`（模型卡片标注 In-Region 为 N/A）。`bedrock-mantle` 上则用 in-region 形式 `anthropic.claude-opus-5`，路径 `/anthropic/v1/messages`，且**必须带 `anthropic_version`**。
+- **可用**：adaptive thinking、思考与工具交替、流式、视觉、PDF 输入、工具调用、citations、prompt caching、bash / text_editor / memory 工具、`tool_search`、对话中 system 消息、`eager_input_streaming`（须写在**工具定义内部**）、context editing + compaction + `input_examples`（各需对应 beta header），1M 上下文 beta header 被接受。
+- **被拒**：旧版 `thinking.type:"enabled"`、`temperature`（`deprecated for this model`）、`output_config.format`、assistant prefill、`web_search_20250305`。
+- **CountTokens 分端点**：`bedrock-runtime` 上 Opus 5 / Sonnet 5 / Opus 4.8 **不支持**（`The provided model doesn't support counting tokens.`，在 admin 凭证下确认，非权限问题），与模型卡片一致；但 **`bedrock-mantle` 上可用**——`POST /anthropic/v1/messages/count_tokens` 带 `anthropic_version`，Opus 5 返回 `{"input_tokens": 11}`。runtime 上 Sonnet 4.6 支持，需用 **in-region** ID 且被计数的 body 里要有 `max_tokens`。
+- **Prompt caching 最小 512 token**（模型卡片），为 Bedrock 上 Claude 的最低值；最多 4 个检查点，TTL 5 分钟/1 小时，可用于 `system`/`messages`/`tools`。
+- **adaptive thinking 默认开启**；据模型卡片可关闭，但关闭后 effort 上限为 `high`。
+- **Computer use** 在 Opus 5 上为工具类型 `computer_20251124`，beta header `computer-use-2025-11-24`。
+- **API**：支持 `Invoke`、`Converse`、`Messages`；不支持 `Responses` 与 `Chat Completions`。服务档位仅 Standard 与 Batch。
+- **未上 mantle**：`anthropic.claude-sonnet-4-6` 与 `anthropic.claude-opus-4-6-v1` 在 mantle 上 404；Opus 5 / Opus 4.8 / Sonnet 5 可用。
 
 ### 关键差异要点
 

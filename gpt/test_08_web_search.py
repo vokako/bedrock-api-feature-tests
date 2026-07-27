@@ -1,35 +1,41 @@
 """Test 08: Web Search — OpenAI built-in server-side `web_search` hosted tool.
 
-The GPT-5.6 model cards list "Server-side tool calling" as supported. This test
-checks whether the OpenAI built-in `web_search` hosted tool actually executes on
-the bedrock-mantle endpoint.
+WORKS on Bedrock, but it is gated by an IAM permission that is easy to miss:
+the calling principal needs **`bedrock-websearch:*`**.
 
-Observed (2026-07-23, us-east-1/us-east-2, Terra & Sol): the API ACCEPTS the tool
-and the model plans + emits `web_search_call` items, but each call comes back with
-status "failed" ("web search service unavailable"). So the search never runs and
-no results/citations are returned.
+Permission trap (verified 2026-07-27): without that permission the request still
+returns HTTP 200 and the model still emits `web_search_call` items, but each one
+has status="failed" and no citations — there is NO AccessDenied error. That
+silent failure looks exactly like "Bedrock does not support web search".
 
-This matches OpenAI's official compatibility guide (feature availability as of the
-2026-07-13 launch), which lists "Hosted web search" as **Not available** on Amazon
-Bedrock: "Hosted tools run through OpenAI-operated service infrastructure and are
-unavailable on Amazon Bedrock." So the FAIL below is EXPECTED, not a regression.
-See https://developers.openai.com/api/docs/guides/amazon-bedrock
+Neither `AmazonBedrockLimitedAccess` (the policy attached to console-generated
+Bedrock API key users) nor `AmazonBedrockFullAccess` includes it. Grant:
 
-The test PASSES only if a web_search_call completes; it FAILS while the backend
-search is non-functional, so it will flip to green automatically if AWS enables it.
+    {"Effect": "Allow", "Action": "bedrock-websearch:*", "Resource": "*"}
+
+This test PASSES when a web_search_call completes; if all calls fail it reports
+the permission as the likely cause.
 """
 from helpers import create, print_header, print_pass, print_fail
 
 print_header("08", "Web Search (server-side hosted tool)")
 
 
-def _statuses(resp):
+def statuses(resp):
     return [o.status for o in resp.output if getattr(o, "type", "") == "web_search_call"]
 
 
+def citations(resp):
+    out = []
+    for o in resp.output:
+        if getattr(o, "type", "") == "message":
+            for c in o.content:
+                out += [a for a in (getattr(c, "annotations", None) or [])]
+    return out
+
+
 try:
-    accepted = False
-    statuses = []
+    all_status, cited = [], []
     for tool_type in ("web_search", "web_search_preview"):
         resp = create(
             tools=[{"type": tool_type}],
@@ -37,23 +43,22 @@ try:
             input="What is the current stock price of NVDA (NVIDIA)? "
                   "Use web search and cite the source URL.",
         )
-        accepted = True  # no validation error -> tool type is accepted
-        st = _statuses(resp)
-        statuses += st
-        print(f"  [{tool_type}] output types: {[o.type for o in resp.output]}")
+        st = statuses(resp)
+        cites = citations(resp)
+        all_status += st
+        cited += cites
         print(f"  [{tool_type}] web_search_call statuses: {st}")
-        print(f"  [{tool_type}] text: {resp.output_text.strip()[:200]!r}")
+        print(f"  [{tool_type}] citations: {len(cites)}")
+        print(f"  [{tool_type}] text: {resp.output_text.strip()[:160]!r}")
 
-    completed = [s for s in statuses if s == "completed"]
-    if completed:
+    if any(s == "completed" for s in all_status):
         print_pass("Web Search (search executed)")
     else:
-        assert accepted, "web_search tool type was not accepted by the API"
         print_fail(
             "Web Search",
-            "tool accepted and model invoked it, but every web_search_call returned "
-            f"status={set(statuses) or 'none'} — server-side search is not functional "
-            "on bedrock-mantle",
+            f"every web_search_call returned status={set(all_status) or 'none'} with no "
+            "citations. This is the silent-failure mode: the calling principal most "
+            "likely lacks the `bedrock-websearch:*` IAM permission (see module docstring)",
         )
 except Exception as e:
     print_fail("Web Search", str(e))
