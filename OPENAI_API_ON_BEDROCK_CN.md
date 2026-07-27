@@ -12,8 +12,10 @@
 
 本文档逐一梳理 OpenAI Responses API 的各特性在 Amazon Bedrock 上 GPT-5.6 三档模型（Terra / Sol / Luna）的支持状态，并说明访问方式与行为要点。它是 [ANTHROPIC_API_ON_BEDROCK_CN.md](ANTHROPIC_API_ON_BEDROCK_CN.md) 的 OpenAI 对应版本。
 
-> 📌 **验证方式**：基于 Bedrock 的 `bedrock-mantle` 端点（OpenAI Responses API），用 `openai` Python SDK 实测。所有标注 ✅ 的特性均有对应测试脚本（`gpt/test_01`–`gpt/test_08`）。
-> 📅 **验证时间**：2026-07-23，模型 `openai.gpt-5.6-terra`，区域 `us-east-1`（web search 另在 Sol / `us-east-1` / `us-east-2` 交叉验证）。
+> 📌 **验证方式**：基于 Bedrock 的 `bedrock-mantle` 端点（OpenAI Responses API），用 `openai` Python SDK 实测。所有标注 ✅ 的特性均有对应测试脚本（`gpt/test_01`–`gpt/test_09`）。
+> 📅 **验证时间**：2026-07-23；**web search 于 2026-07-27 重新调查并修正**。除特别说明外，模型为 `openai.gpt-5.6-terra`、区域 `us-east-1`（web search 在三档模型 × `us-east-1` / `us-east-2` / `us-west-2` 交叉验证）。
+>
+> ⚠️ **修正说明（2026-07-27）**：本文早前版本曾断言 hosted web search 在 Bedrock 上不可用。**该结论是错的**——它可用，只是被 `bedrock-websearch:*` IAM 权限门禁。当初的错误源于只用默认 Bedrock API key 测试（其 IAM 用户缺该权限），而失败是静默的。详见[第五节](#五web-search--可用但被一个-iam-权限门禁)。
 
 ## 目录
 

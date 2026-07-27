@@ -12,8 +12,8 @@
 
 本文档逐一梳理 Anthropic Messages API 的每个特性在 Amazon Bedrock 上的原生支持状态，并说明各模型之间的行为差异。对于 Bedrock 尚未内置的 Anthropic 特有特性，给出通过代理层或应用层自行实现的方案。
 
-> 📌 **验证方式**：基于 Bedrock InvokeModel（runtime）与 Messages API（mantle）实测。所有标注 ✅ 的特性均有对应测试脚本（`test_01`–`test_24`）。
-> 📅 **最近一次全模型复核**：2026-07-03，覆盖 Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5。图片限制复核 2026-07-06。
+> 📌 **验证方式**：基于 Bedrock InvokeModel（runtime）与 Messages API（mantle）实测。所有标注 ✅ 的特性均有对应测试脚本（`claude/test_01`–`claude/test_25`）。
+> 📅 **最近一次全模型复核**：2026-07-27，新增 **Claude Opus 5** 并对 Opus 5 / Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5 全量重跑矩阵（[`claude/test_25`](claude/test_25_cross_model_matrix.py)）。上一次全量复核 2026-07-03；图片限制 2026-07-06。
 
 ## 目录
 
@@ -42,7 +42,9 @@
 | Claude Sonnet 4.6 | `global.anthropic.claude-sonnet-4-6` | |
 | Claude Haiku 4.5 | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | |
 
-### 跨模型行为矩阵（2026-07-03 实测；Opus 5 列与复核为 2026-07-27，全 runtime）
+### 跨模型行为矩阵
+
+全部经 `bedrock-runtime` 实测。Opus 5 列与全量复核为 2026-07-27，上一次为 2026-07-03。可用 [`claude/test_25`](claude/test_25_cross_model_matrix.py) 复现。
 
 **关键结论：模型明显分成"新一代"（Opus 5 / Sonnet 5 / Fable 5 / Opus 4.8 / 4.7）与"4.6 一代"（Opus 4.6 / Sonnet 4.6 / Haiku 4.5）两种行为。**
 
@@ -104,7 +106,7 @@ Opus 4.7 有多个特性 Bedrock 侧尚未适配（beta header 被接受但带�
 
 ### Fable 5 / Sonnet 5 备注
 
-- **Fable 5**：曾于 2026-06 从 Bedrock 短暂下线（runtime 5xx / mantle 404），后 "back on Amazon Bedrock with stronger guardrails" 重新上线，2026-07-03 复测 runtime + mantle 均恢复正常。是 Mythos 级模型，**必须开启 `provider_data_share` 数据保留**才能调用（账号级或 project 级），详见 [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md) 与 [test_22](test_22_fable5.py)。
+- **Fable 5**：曾于 2026-06 从 Bedrock 短暂下线（runtime 5xx / mantle 404），后 "back on Amazon Bedrock with stronger guardrails" 重新上线，2026-07-03 复测 runtime + mantle 均恢复正常。是 Mythos 级模型，**必须开启 `provider_data_share` 数据保留**才能调用（账号级或 project 级），详见 [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md) 与 [test_22](claude/test_22_fable5.py)。
 - **Sonnet 5**（2026-06-30）：最强 agentic Sonnet，1M 上下文 / 128k 输出，特性与 Sonnet 4.6 相同（除 Priority Tier），在 Bedrock 上行为归入"新一代"。
 
 ---
@@ -113,28 +115,28 @@ Opus 4.7 有多个特性 Bedrock 侧尚未适配（beta header 被接受但带�
 
 | 特性 | Anthropic API | Bedrock Converse | Bedrock Invoke | 实现差异 | 验证 |
 |------|:---:|:---:|:---:|:---:|:---:|
-| Messages API 基础 | ✅ | ✅ | ✅ | 无 | [test_01](test_01_messages_basic.py) |
-| Streaming (SSE) | ✅ | ✅ | ✅ | 无 | [test_02](test_02_streaming.py) |
-| Tool Use | ✅ | ✅ | ✅ | 无 | [test_03](test_03_tool_use.py) |
-| Extended Thinking（旧版，仅 4.6 一代） | ✅ | ✅ | ✅ | 新一代已移除 | [test_04](test_04_extended_thinking.py) |
-| Adaptive Thinking | ✅ | ✅ | ✅ | Haiku 4.5 无 effort | [test_16](test_16_adaptive_thinking.py) |
-| Interleaved Thinking | ✅ | ✅ | ✅ | 无 | [test_05](test_05_interleaved_thinking.py) |
-| Prompt Caching | ✅ | ✅ | ✅ | 最小长度按模型不同 | [test_06](test_06_prompt_caching.py) |
-| Vision | ✅ | ✅ | ✅ | 天花板 600 张/请求；101–600 非确定性（部分后端限 100），可靠安全值 100 | [test_07](test_07_vision.py) [test_24](test_24_image_limits.py) |
-| PDF Support | ✅ | ✅ | ✅ | 无 | [test_08](test_08_pdf_support.py) |
-| Citations | ✅ | ✅ | ✅ | 无 | [test_09](test_09_citations.py) |
-| Structured Outputs (`output_config.format`) | ✅ | ✅ | ✅ | **仅 4.6 一代**；新一代 400 | [test_10](test_10_structured_outputs.py) |
-| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | 4.6 系列 + 新一代（Opus 4.7/4.8、Fable 5，2026-07-17 复测）均支持 | [test_11](test_11_eager_input_streaming.py) |
-| Compaction | ✅ | ✅ | ✅ | 无 | [test_12](test_12_compaction.py) |
-| Context Editing | ✅ | ✅ | ✅ | Opus 4.7 不可用 | [test_13](test_13_context_editing.py) |
-| Tool Search | ✅ | ❌ | ✅ | 仅 Invoke API；Opus 4.7 不可用 | [test_14](test_14_tool_search.py) |
-| Tool Input Examples | ✅ | ❌ | ✅ | 仅 Invoke API | [test_15](test_15_tool_input_examples.py) |
-| Bash Tool | ✅ | ✅ | ✅ | Opus 4.7 不可用 | [test_17](test_17_bash_tool.py) |
-| Text Editor Tool | ✅ | ✅ | ✅ | name 映射；Opus 4.7 不可用 | [test_18](test_18_text_editor_tool.py) |
-| Claude 4.7 变更验证 | — | — | ✅ | breaking changes | [test_21](test_21_claude47_changes.py) |
-| Claude Fable 5 兼容性 | ✅ | — | ✅ | 需 `provider_data_share` | [test_22](test_22_fable5.py) |
-| Mid-conversation System Messages | ✅ | ❓ | ✅ | 仅新一代 4.8/Fable5/Sonnet5；文档称不支持但实测可用 | [test_23](test_23_mid_conversation_system.py) |
-| Token Counting | ✅ | ❌ | ❌ | Bedrock 原生 CountTokens API（仅 in-region ID） | [test_20](test_20_count_tokens.py) |
+| Messages API 基础 | ✅ | ✅ | ✅ | 无 | [test_01](claude/test_01_messages_basic.py) |
+| Streaming (SSE) | ✅ | ✅ | ✅ | 无 | [test_02](claude/test_02_streaming.py) |
+| Tool Use | ✅ | ✅ | ✅ | 无 | [test_03](claude/test_03_tool_use.py) |
+| Extended Thinking（旧版，仅 4.6 一代） | ✅ | ✅ | ✅ | 新一代已移除 | [test_04](claude/test_04_extended_thinking.py) |
+| Adaptive Thinking | ✅ | ✅ | ✅ | Haiku 4.5 无 effort | [test_16](claude/test_16_adaptive_thinking.py) |
+| Interleaved Thinking | ✅ | ✅ | ✅ | 无 | [test_05](claude/test_05_interleaved_thinking.py) |
+| Prompt Caching | ✅ | ✅ | ✅ | 最小长度按模型不同 | [test_06](claude/test_06_prompt_caching.py) |
+| Vision | ✅ | ✅ | ✅ | 天花板 600 张/请求；101–600 非确定性（部分后端限 100），可靠安全值 100 | [test_07](claude/test_07_vision.py) [test_24](claude/test_24_image_limits.py) |
+| PDF Support | ✅ | ✅ | ✅ | 无 | [test_08](claude/test_08_pdf_support.py) |
+| Citations | ✅ | ✅ | ✅ | 无 | [test_09](claude/test_09_citations.py) |
+| Structured Outputs (`output_config.format`) | ✅ | ✅ | ✅ | **仅 4.6 一代**；新一代 400 | [test_10](claude/test_10_structured_outputs.py) |
+| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | 4.6 系列 + 新一代（Opus 4.7/4.8、Fable 5，2026-07-17 复测）均支持 | [test_11](claude/test_11_eager_input_streaming.py) |
+| Compaction | ✅ | ✅ | ✅ | 无 | [test_12](claude/test_12_compaction.py) |
+| Context Editing | ✅ | ✅ | ✅ | Opus 4.7 不可用 | [test_13](claude/test_13_context_editing.py) |
+| Tool Search | ✅ | ❌ | ✅ | 仅 Invoke API；Opus 4.7 不可用 | [test_14](claude/test_14_tool_search.py) |
+| Tool Input Examples | ✅ | ❌ | ✅ | 仅 Invoke API | [test_15](claude/test_15_tool_input_examples.py) |
+| Bash Tool | ✅ | ✅ | ✅ | Opus 4.7 不可用 | [test_17](claude/test_17_bash_tool.py) |
+| Text Editor Tool | ✅ | ✅ | ✅ | name 映射；Opus 4.7 不可用 | [test_18](claude/test_18_text_editor_tool.py) |
+| Claude 4.7 变更验证 | — | — | ✅ | breaking changes | [test_21](claude/test_21_claude47_changes.py) |
+| Claude Fable 5 兼容性 | ✅ | — | ✅ | 需 `provider_data_share` | [test_22](claude/test_22_fable5.py) |
+| Mid-conversation System Messages | ✅ | ❓ | ✅ | 仅新一代 4.8/Fable5/Sonnet5；文档称不支持但实测可用 | [test_23](claude/test_23_mid_conversation_system.py) |
+| Token Counting | ✅ | ❌ | ❌ | Bedrock 原生 CountTokens API（仅 in-region ID） | [test_20](claude/test_20_count_tokens.py) |
 | Web Search Tool | ✅ | ❌ | ❌ | 需自行实现 | — |
 | Web Fetch Tool | ✅ | ❌ | ❌ | 需自行实现 | — |
 | Code Execution Tool | ✅ | ❌ | ❌ | 需自行实现 | — |
@@ -154,7 +156,7 @@ Opus 4.7 有多个特性 Bedrock 侧尚未适配（beta header 被接受但带�
 
 以下特性 Bedrock 完整支持。InvokeModel API 与 Anthropic Messages API 格式基本等价（请求/响应结构相同，仅需添加 `anthropic_version` 字段和调整认证方式），无需格式转换；Converse API 则需要 Anthropic ↔ Bedrock 格式转换。
 
-> 📌 模型间的 breaking changes（Thinking / 采样参数 / prefill / Structured Outputs 等）统一见[第一节的跨模型矩阵](#跨模型行为矩阵2026-07-03-全-runtime-实测)，本节不再逐条重复。
+> 📌 模型间的 breaking changes（Thinking / 采样参数 / prefill / Structured Outputs 等）统一见[第一节的跨模型矩阵](#跨模型行为矩阵)，本节不再逐条重复。
 
 ### Messages API 基础
 
@@ -203,7 +205,7 @@ Claude 动态决定是否思考及思考深度，无需手动设 `budget_tokens`
 
 ### Prompt Caching
 
-缓存重复使用的 system prompt、工具定义等。**最小可缓存长度按模型不同**（见[第一节矩阵](#跨模型行为矩阵2026-07-03-全-runtime-实测)）。
+缓存重复使用的 system prompt、工具定义等。**最小可缓存长度按模型不同**（见[第一节矩阵](#跨模型行为矩阵)）。
 
 - **Anthropic**: [prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)
 - **Bedrock**: InvokeModel 下 `cache_control` 格式与 Anthropic 一致；Converse 通过 `cachePoint` 支持。TTL 支持 5m 和 1h。
@@ -254,7 +256,7 @@ Claude 动态决定是否思考及思考深度，无需手动设 `budget_tokens`
 >
 > 另外，超过 20 张图片时每张图片有更严格的尺寸限制（单边不超 2000px），否则报 `invalid_request_error`。单张图片大小限 **5 MB**（Anthropic API 为 10 MB）。
 >
-> 验证：[test_24](test_24_image_limits.py)（2026-07-06 实测）
+> 验证：[test_24](claude/test_24_image_limits.py)（2026-07-06 实测）
 
 ### PDF Support
 
@@ -436,7 +438,7 @@ Claude 在回答中引用来源文档的具体位置，适用于 RAG、文档问
 | **Anthropic** | `POST /v1/messages/count_tokens` |
 | **Bedrock** | **原生支持** [CountTokens API](https://docs.aws.amazon.com/bedrock/latest/userguide/count-tokens.html)，免费，支持 InvokeModel/Converse 格式 |
 
-> ⚠️ **限制**：CountTokens **仅支持 in-region model ID**（如 `anthropic.claude-sonnet-4-6`），用 `us.`/`global.` 前缀会报 `The provided model doesn't support counting tokens`——代理层需剥离前缀。**Opus 4.7 不支持**（仅 global 部署、无 in-region ID）。已验证支持：Claude 3.5 Haiku、Sonnet 4、Sonnet 4.5、Haiku 4.5、Sonnet 4.6、Opus 4.6。见 [test_20](test_20_count_tokens.py)。
+> ⚠️ **限制**：CountTokens **仅支持 in-region model ID**（如 `anthropic.claude-sonnet-4-6`），用 `us.`/`global.` 前缀会报 `The provided model doesn't support counting tokens`——代理层需剥离前缀。**Opus 4.7 不支持**（仅 global 部署、无 in-region ID）。已验证支持：Claude 3.5 Haiku、Sonnet 4、Sonnet 4.5、Haiku 4.5、Sonnet 4.6、Opus 4.6。见 [test_20](claude/test_20_count_tokens.py)。
 
 **方案**：代理层实现 `/v1/messages/count_tokens`，转换为 Bedrock CountTokens 格式并用 in-region model ID 调用；不支持的模型回退到本地 tokenizer。
 
@@ -520,7 +522,7 @@ Anthropic API 通过 `anthropic-beta` header 启用实验性功能。在 Bedrock
 | `output-128k-2025-02-19` | 128k Output（已 GA） | |
 | `token-counting-2024-11-01` | Token Counting | ❌ 功能不可用（用原生 CountTokens API） |
 | `mcp-client-2025-11-20` | MCP Connector | ❌ 功能不可用 |
-| `web-search-2025-03-05` | Web Search | ❌ 功能不可用 |
+| `web-search-2025-03-05` | Web Search | ❌ 工具类型在所有模型、两个端点上均于校验层被拒（见[第一节](#所有-claude-模型都不支持-web-search2026-07-27-实测)） |
 
 ### 需要映射（Bedrock 用不同 header 名，仅 InvokeModel）
 
@@ -573,7 +575,7 @@ Opus 4.8（及 Sonnet 5 / Fable 5）随附几个新卖点，在 Bedrock 上支�
 - **官方文档 vs 实测**：Anthropic 文档称 "not available on Amazon Bedrock"，但实测上述三个模型（InvokeModel + mantle）均可用。
 - **放置规则**：`role:system` 条目须紧跟 `user` 轮（或以 server tool use 结尾的 `assistant` 轮），且为数组最后一项或紧接一个 `assistant` 轮；不能位于 `tool_use` 与其 `tool_result` 之间。
 
-**实测结论**（见 [test_23](test_23_mid_conversation_system.py)）：
+**实测结论**（见 [test_23](claude/test_23_mid_conversation_system.py)）：
 
 1. 接受且**遵守**中性 system 指令（"每条回复末尾加 `###MANGO###`" → 照做）。
 2. **Cache 保留**：已缓存前缀（≥4096 token）后追加 mid-sys 条目，下次请求 `cache_read_input_tokens=9117`，前缀缓存未失效 ✅。

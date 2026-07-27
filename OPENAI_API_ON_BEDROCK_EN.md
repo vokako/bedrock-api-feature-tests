@@ -12,8 +12,10 @@
 
 This document walks through each OpenAI Responses API feature and its support status for the GPT-5.6 tiers (Terra / Sol / Luna) on Amazon Bedrock, along with the access path and behavioral notes. It is the OpenAI counterpart to [ANTHROPIC_API_ON_BEDROCK_EN.md](ANTHROPIC_API_ON_BEDROCK_EN.md).
 
-> 📌 **Verification method**: measured against the Bedrock `bedrock-mantle` endpoint (OpenAI Responses API) using the `openai` Python SDK. Every ✅ has a corresponding test script (`gpt/test_01`–`gpt/test_08`).
-> 📅 **Verified**: 2026-07-23, model `openai.gpt-5.6-terra` in `us-east-1` (web search also cross-checked on Sol in `us-east-1` / `us-east-2`).
+> 📌 **Verification method**: measured against the Bedrock `bedrock-mantle` endpoint (OpenAI Responses API) using the `openai` Python SDK. Every ✅ has a corresponding test script (`gpt/test_01`–`gpt/test_09`).
+> 📅 **Verified**: 2026-07-23; **web search re-investigated and corrected 2026-07-27**. Model `openai.gpt-5.6-terra` in `us-east-1` unless noted (web search cross-checked on all three tiers in `us-east-1` / `us-east-2` / `us-west-2`).
+>
+> ⚠️ **Correction (2026-07-27)**: an earlier version of this document concluded that hosted web search does not work on Bedrock. That was wrong — it works, and is gated by the `bedrock-websearch:*` IAM permission. The original conclusion came from testing only with a default Bedrock API key, whose IAM user lacks that permission, and the failure is silent. See [§5](#5-web-search--works-but-gated-by-an-iam-permission).
 
 ## Table of Contents
 

@@ -12,8 +12,8 @@
 
 This document walks through each Anthropic Messages API feature and its native support status on Amazon Bedrock, along with the behavioral differences between models. For Anthropic-specific features not built into Bedrock, it provides proxy-layer or application-layer implementation strategies.
 
-> 📌 **Verification method**: measured against Bedrock InvokeModel (runtime) and the Messages API (mantle). Every ✅ has a corresponding test script (`test_01`–`test_24`).
-> 📅 **Latest full re-verification**: 2026-07-03, covering Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5. Image limits verified 2026-07-06.
+> 📌 **Verification method**: measured against Bedrock InvokeModel (runtime) and the Messages API (mantle). Every ✅ has a corresponding test script (`claude/test_01`–`claude/test_25`).
+> 📅 **Latest full re-verification**: 2026-07-27, adding **Claude Opus 5** and re-running the whole matrix across Opus 5 / Sonnet 5 / Fable 5 / Opus 4.8 / 4.7 / 4.6 / Sonnet 4.6 / Haiku 4.5 ([`claude/test_25`](claude/test_25_cross_model_matrix.py)). Prior full sweep 2026-07-03; image limits 2026-07-06.
 
 ## Table of Contents
 
@@ -42,7 +42,9 @@ This document walks through each Anthropic Messages API feature and its native s
 | Claude Sonnet 4.6 | `global.anthropic.claude-sonnet-4-6` | |
 | Claude Haiku 4.5 | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | |
 
-### Cross-model behavior matrix (measured 2026-07-03; Opus 5 column + re-verification 2026-07-27, all via runtime)
+### Cross-model behavior matrix
+
+Measured via `bedrock-runtime` for all models. Opus 5 column and full re-verification 2026-07-27; prior sweep 2026-07-03. Reproduce with [`claude/test_25`](claude/test_25_cross_model_matrix.py).
 
 **Key takeaway: models split into a "new generation" (Opus 5 / Sonnet 5 / Fable 5 / Opus 4.8 / 4.7) and the "4.6 generation" (Opus 4.6 / Sonnet 4.6 / Haiku 4.5).**
 
@@ -104,7 +106,7 @@ Several features are not yet adapted for Opus 4.7 on Bedrock (the beta header is
 
 ### Notes on Fable 5 / Sonnet 5
 
-- **Fable 5**: was briefly delisted from Bedrock in 2026-06 (runtime 5xx / mantle 404), then relaunched "back on Amazon Bedrock with stronger guardrails"; re-verified working on runtime + mantle on 2026-07-03. As a Mythos-class model it **requires `provider_data_share` retention** (account or project scope) to invoke — see [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md) and [test_22](test_22_fable5.py).
+- **Fable 5**: was briefly delisted from Bedrock in 2026-06 (runtime 5xx / mantle 404), then relaunched "back on Amazon Bedrock with stronger guardrails"; re-verified working on runtime + mantle on 2026-07-03. As a Mythos-class model it **requires `provider_data_share` retention** (account or project scope) to invoke — see [FABLE5_PROJECT_SETUP.md](FABLE5_PROJECT_SETUP.md) and [test_22](claude/test_22_fable5.py).
 - **Sonnet 5** (2026-06-30): most agentic Sonnet, 1M context / 128k output, same features as Sonnet 4.6 (except Priority Tier). Behaves as new-gen on Bedrock.
 
 ---
@@ -113,28 +115,28 @@ Several features are not yet adapted for Opus 4.7 on Bedrock (the beta header is
 
 | Feature | Anthropic API | Bedrock Converse | Bedrock Invoke | Difference | Test |
 |---------|:---:|:---:|:---:|:---:|:---:|
-| Messages API basics | ✅ | ✅ | ✅ | None | [test_01](test_01_messages_basic.py) |
-| Streaming (SSE) | ✅ | ✅ | ✅ | None | [test_02](test_02_streaming.py) |
-| Tool Use | ✅ | ✅ | ✅ | None | [test_03](test_03_tool_use.py) |
-| Extended Thinking (legacy, 4.6 gen only) | ✅ | ✅ | ✅ | Removed on new-gen | [test_04](test_04_extended_thinking.py) |
-| Adaptive Thinking | ✅ | ✅ | ✅ | Haiku 4.5 has no effort | [test_16](test_16_adaptive_thinking.py) |
-| Interleaved Thinking | ✅ | ✅ | ✅ | None | [test_05](test_05_interleaved_thinking.py) |
-| Prompt Caching | ✅ | ✅ | ✅ | Min length varies by model | [test_06](test_06_prompt_caching.py) |
-| Vision | ✅ | ✅ | ✅ | Ceiling 600/request; 101–600 non-deterministic (some backends cap at 100); reliable safe limit 100 | [test_07](test_07_vision.py) [test_24](test_24_image_limits.py) |
-| PDF Support | ✅ | ✅ | ✅ | None | [test_08](test_08_pdf_support.py) |
-| Citations | ✅ | ✅ | ✅ | None | [test_09](test_09_citations.py) |
-| Structured Outputs (`output_config.format`) | ✅ | ✅ | ✅ | **4.6 gen only**; new-gen 400 | [test_10](test_10_structured_outputs.py) |
-| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | 4.6 series + next-gen (Opus 4.7/4.8, Fable 5; re-tested 2026-07-17) | [test_11](test_11_eager_input_streaming.py) |
-| Compaction | ✅ | ✅ | ✅ | None | [test_12](test_12_compaction.py) |
-| Context Editing | ✅ | ✅ | ✅ | Opus 4.7 unavailable | [test_13](test_13_context_editing.py) |
-| Tool Search | ✅ | ❌ | ✅ | Invoke API only; Opus 4.7 unavailable | [test_14](test_14_tool_search.py) |
-| Tool Input Examples | ✅ | ❌ | ✅ | Invoke API only | [test_15](test_15_tool_input_examples.py) |
-| Bash Tool | ✅ | ✅ | ✅ | Opus 4.7 unavailable | [test_17](test_17_bash_tool.py) |
-| Text Editor Tool | ✅ | ✅ | ✅ | name mapping; Opus 4.7 unavailable | [test_18](test_18_text_editor_tool.py) |
-| Claude 4.7 change verification | — | — | ✅ | breaking changes | [test_21](test_21_claude47_changes.py) |
-| Claude Fable 5 compatibility | ✅ | — | ✅ | needs `provider_data_share` | [test_22](test_22_fable5.py) |
-| Mid-conversation System Messages | ✅ | ❓ | ✅ | new-gen 4.8/Fable5/Sonnet5 only; docs say unsupported but verified | [test_23](test_23_mid_conversation_system.py) |
-| Token Counting | ✅ | ❌ | ❌ | Bedrock native CountTokens API (in-region ID only) | [test_20](test_20_count_tokens.py) |
+| Messages API basics | ✅ | ✅ | ✅ | None | [test_01](claude/test_01_messages_basic.py) |
+| Streaming (SSE) | ✅ | ✅ | ✅ | None | [test_02](claude/test_02_streaming.py) |
+| Tool Use | ✅ | ✅ | ✅ | None | [test_03](claude/test_03_tool_use.py) |
+| Extended Thinking (legacy, 4.6 gen only) | ✅ | ✅ | ✅ | Removed on new-gen | [test_04](claude/test_04_extended_thinking.py) |
+| Adaptive Thinking | ✅ | ✅ | ✅ | Haiku 4.5 has no effort | [test_16](claude/test_16_adaptive_thinking.py) |
+| Interleaved Thinking | ✅ | ✅ | ✅ | None | [test_05](claude/test_05_interleaved_thinking.py) |
+| Prompt Caching | ✅ | ✅ | ✅ | Min length varies by model | [test_06](claude/test_06_prompt_caching.py) |
+| Vision | ✅ | ✅ | ✅ | Ceiling 600/request; 101–600 non-deterministic (some backends cap at 100); reliable safe limit 100 | [test_07](claude/test_07_vision.py) [test_24](claude/test_24_image_limits.py) |
+| PDF Support | ✅ | ✅ | ✅ | None | [test_08](claude/test_08_pdf_support.py) |
+| Citations | ✅ | ✅ | ✅ | None | [test_09](claude/test_09_citations.py) |
+| Structured Outputs (`output_config.format`) | ✅ | ✅ | ✅ | **4.6 gen only**; new-gen 400 | [test_10](claude/test_10_structured_outputs.py) |
+| Fine-grained Tool Streaming | ✅ | ✅ | ✅ | 4.6 series + next-gen (Opus 4.7/4.8, Fable 5; re-tested 2026-07-17) | [test_11](claude/test_11_eager_input_streaming.py) |
+| Compaction | ✅ | ✅ | ✅ | None | [test_12](claude/test_12_compaction.py) |
+| Context Editing | ✅ | ✅ | ✅ | Opus 4.7 unavailable | [test_13](claude/test_13_context_editing.py) |
+| Tool Search | ✅ | ❌ | ✅ | Invoke API only; Opus 4.7 unavailable | [test_14](claude/test_14_tool_search.py) |
+| Tool Input Examples | ✅ | ❌ | ✅ | Invoke API only | [test_15](claude/test_15_tool_input_examples.py) |
+| Bash Tool | ✅ | ✅ | ✅ | Opus 4.7 unavailable | [test_17](claude/test_17_bash_tool.py) |
+| Text Editor Tool | ✅ | ✅ | ✅ | name mapping; Opus 4.7 unavailable | [test_18](claude/test_18_text_editor_tool.py) |
+| Claude 4.7 change verification | — | — | ✅ | breaking changes | [test_21](claude/test_21_claude47_changes.py) |
+| Claude Fable 5 compatibility | ✅ | — | ✅ | needs `provider_data_share` | [test_22](claude/test_22_fable5.py) |
+| Mid-conversation System Messages | ✅ | ❓ | ✅ | new-gen 4.8/Fable5/Sonnet5 only; docs say unsupported but verified | [test_23](claude/test_23_mid_conversation_system.py) |
+| Token Counting | ✅ | ❌ | ❌ | Bedrock native CountTokens API (in-region ID only) | [test_20](claude/test_20_count_tokens.py) |
 | Web Search Tool | ✅ | ❌ | ❌ | Self-implement | — |
 | Web Fetch Tool | ✅ | ❌ | ❌ | Self-implement | — |
 | Code Execution Tool | ✅ | ❌ | ❌ | Self-implement | — |
@@ -154,7 +156,7 @@ Several features are not yet adapted for Opus 4.7 on Bedrock (the beta header is
 
 These features are fully supported on Bedrock. The InvokeModel API is largely equivalent to the Anthropic Messages API (same request/response shape, just add the `anthropic_version` field and adjust auth) — no format conversion needed; the Converse API requires Anthropic ↔ Bedrock conversion.
 
-> 📌 Cross-model breaking changes (Thinking / sampling params / prefill / Structured Outputs, etc.) are consolidated in the [cross-model matrix in Section 1](#cross-model-behavior-matrix-measured-2026-07-03-all-via-runtime); this section does not repeat them.
+> 📌 Cross-model breaking changes (Thinking / sampling params / prefill / Structured Outputs, etc.) are consolidated in the [cross-model matrix in Section 1](#cross-model-behavior-matrix); this section does not repeat them.
 
 ### Messages API basics
 
@@ -203,7 +205,7 @@ Thinking interleaved between tool calls. Auto-enabled in adaptive mode; in manua
 
 ### Prompt Caching
 
-Caches reused system prompts, tool definitions, etc. **Minimum cacheable length varies by model** (see the [Section 1 matrix](#cross-model-behavior-matrix-measured-2026-07-03-all-via-runtime)).
+Caches reused system prompts, tool definitions, etc. **Minimum cacheable length varies by model** (see the [Section 1 matrix](#cross-model-behavior-matrix)).
 
 - **Anthropic**: [prompt-caching](https://docs.anthropic.com/en/build-with-claude/prompt-caching)
 - **Bedrock**: InvokeModel `cache_control` matches Anthropic; Converse uses `cachePoint`. TTL 5m and 1h.
@@ -254,7 +256,7 @@ Understand and analyze images.
 >
 > Additionally, when a request contains more than 20 images, a stricter per-image dimension limit applies (max 2000px per side); otherwise returns `invalid_request_error`. Per-image size limit is **5 MB** (vs. 10 MB on direct Anthropic API).
 >
-> Verification: [test_24](test_24_image_limits.py) (tested 2026-07-06)
+> Verification: [test_24](claude/test_24_image_limits.py) (tested 2026-07-06)
 
 ### PDF Support
 
@@ -436,7 +438,7 @@ Estimate token usage before sending.
 | **Anthropic** | `POST /v1/messages/count_tokens` |
 | **Bedrock** | **Native** [CountTokens API](https://docs.aws.amazon.com/bedrock/latest/userguide/count-tokens.html), free, supports InvokeModel/Converse |
 
-> ⚠️ **Limit**: CountTokens **only supports in-region model IDs** (e.g. `anthropic.claude-sonnet-4-6`); `us.`/`global.` prefixes return `The provided model doesn't support counting tokens` — the proxy must strip prefixes. **Opus 4.7 unsupported** (global-only, no in-region ID). Verified: Claude 3.5 Haiku, Sonnet 4, Sonnet 4.5, Haiku 4.5, Sonnet 4.6, Opus 4.6. See [test_20](test_20_count_tokens.py).
+> ⚠️ **Limit**: CountTokens **only supports in-region model IDs** (e.g. `anthropic.claude-sonnet-4-6`); `us.`/`global.` prefixes return `The provided model doesn't support counting tokens` — the proxy must strip prefixes. **Opus 4.7 unsupported** (global-only, no in-region ID). Verified: Claude 3.5 Haiku, Sonnet 4, Sonnet 4.5, Haiku 4.5, Sonnet 4.6, Opus 4.6. See [test_20](claude/test_20_count_tokens.py).
 
 **Approach**: proxy implements `/v1/messages/count_tokens`, converts to Bedrock CountTokens with an in-region ID; falls back to a local tokenizer for unsupported models.
 
@@ -520,7 +522,7 @@ Anthropic enables experimental features via `anthropic-beta` headers. On Bedrock
 | `output-128k-2025-02-19` | 128k Output (GA) | |
 | `token-counting-2024-11-01` | Token Counting | ❌ non-functional (use native CountTokens API) |
 | `mcp-client-2025-11-20` | MCP Connector | ❌ non-functional |
-| `web-search-2025-03-05` | Web Search | ❌ non-functional |
+| `web-search-2025-03-05` | Web Search | ❌ tool type rejected at validation on every model, both endpoints (see [§1](#web-search-is-not-available-on-any-claude-model-measured-2026-07-27)) |
 
 ### Requires mapping (Bedrock uses a different name, InvokeModel only)
 
@@ -573,7 +575,7 @@ Insert a `{"role":"system"}` entry into `messages` to add system instructions mi
 - **Docs vs measurement**: Anthropic docs say "not available on Amazon Bedrock", but all three models work empirically (InvokeModel + mantle).
 - **Placement rules**: a `role:system` entry must immediately follow a `user` turn (or an `assistant` turn ending in server tool use), and be the last entry or precede an `assistant` turn; it cannot sit between a `tool_use` and its `tool_result`.
 
-**Verified findings** (see [test_23](test_23_mid_conversation_system.py)):
+**Verified findings** (see [test_23](claude/test_23_mid_conversation_system.py)):
 
 1. Accepts and **honors** a benign system instruction ("end every reply with `###MANGO###`" → complied).
 2. **Cache preserved**: after a cached prefix (≥4096 tokens), appending a mid-sys entry yields `cache_read_input_tokens=9117` on the next request — prefix cache not invalidated ✅.
