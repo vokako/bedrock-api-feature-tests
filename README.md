@@ -1,5 +1,17 @@
 # Bedrock API Feature Tests
 
+> ⚠️ **免责声明 / Disclaimer**
+>
+> 本仓库的结论均来自**特定时间、特定账号、特定区域**下的实测记录，仅供参考，**一切以你自己的最终实践为准**。
+> Bedrock 的模型上线、API 行为、区域可用性和 IAM 权限要求都在持续变化，且结果会随账号权限、配额与数据保留设置而不同——本文记录的行为随时可能与你的环境不符。请以官方文档和你自己的实测结果为准；运行测试会产生真实的 API 调用与费用。
+>
+> All findings here are point-in-time observations from one AWS account, region and
+> permission set. **Treat them as reference only — your own testing is authoritative.**
+> Model availability, API behavior, regional rollout and IAM requirements on Bedrock
+> change continuously, and results vary with account permissions, quotas and data
+> retention settings. Defer to the official documentation and your own results.
+> Running these tests makes real API calls and incurs real cost.
+
 Verify third-party model API features on Amazon Bedrock, organized into two parallel sections:
 
 - **`claude/`** — Anthropic API features via the `bedrock-runtime` **InvokeModel** API.
