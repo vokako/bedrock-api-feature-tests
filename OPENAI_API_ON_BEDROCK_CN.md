@@ -131,6 +131,25 @@ print(resp.output_text)
 
 **`AmazonBedrockLimitedAccess`**（控制台生成 API key 时默认挂的策略）和 **`AmazonBedrockFullAccess`** 都**不含**它。`bedrock-websearch` 是一个独立的服务命名空间——不被 `bedrock:*` 或 `bedrock-mantle:*` 覆盖，也不在 botocore 的服务列表里。
 
+Bedrock API key 本质是一个名为 `BedrockAPIKey-<后缀>` 的专用 IAM 用户的长期凭证，所以把权限加到该用户上：
+
+```bash
+aws iam put-user-policy \
+  --user-name BedrockAPIKey-<后缀> \
+  --policy-name BedrockWebSearchAccess \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "HostedWebSearchTool",
+      "Effect": "Allow",
+      "Action": "bedrock-websearch:*",
+      "Resource": "*"
+    }]
+  }'
+```
+
+然后用 [`check_gpt56_web_search.py`](check_gpt56_web_search.py) 或 `gpt/test_08` 验证。权限到位后 OpenAI 整套测试 **9/9** 全通过；缺权限时 `test_08` 是唯一失败项。
+
 2026-07-27 实测（`openai.gpt-5.6-terra` @ `us-east-1`，同一个 API key，只改 IAM 策略）：
 
 | 主体权限 | `web_search_call` 结果 |

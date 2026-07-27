@@ -131,6 +131,25 @@ Send a large shared prefix (via `instructions`) twice with the same `prompt_cach
 
 Neither **`AmazonBedrockLimitedAccess`** (what console-generated Bedrock API key users get) nor **`AmazonBedrockFullAccess`** includes it. `bedrock-websearch` is a separate service namespace — not covered by `bedrock:*` or `bedrock-mantle:*`, and absent from botocore's service list.
 
+A Bedrock API key is the long-term credential of a dedicated IAM user called `BedrockAPIKey-<suffix>`, so grant it there:
+
+```bash
+aws iam put-user-policy \
+  --user-name BedrockAPIKey-<suffix> \
+  --policy-name BedrockWebSearchAccess \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Sid": "HostedWebSearchTool",
+      "Effect": "Allow",
+      "Action": "bedrock-websearch:*",
+      "Resource": "*"
+    }]
+  }'
+```
+
+Then verify with [`check_gpt56_web_search.py`](check_gpt56_web_search.py) or `gpt/test_08`. With the permission in place the full OpenAI suite runs **9/9**; without it `test_08` is the only failure.
+
 Verified 2026-07-27 on `openai.gpt-5.6-terra` @ `us-east-1` — same API key, only the IAM policy changed:
 
 | Principal's permissions | `web_search_call` result |
