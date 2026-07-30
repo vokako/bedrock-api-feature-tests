@@ -13,9 +13,11 @@
 本文档逐一梳理 OpenAI Responses API 的各特性在 Amazon Bedrock 上 GPT-5.6 三档模型（Terra / Sol / Luna）的支持状态，并说明访问方式与行为要点。它是 [ANTHROPIC_API_ON_BEDROCK_CN.md](ANTHROPIC_API_ON_BEDROCK_CN.md) 的 OpenAI 对应版本。
 
 > 📌 **验证方式**：基于 Bedrock 的 `bedrock-mantle` 端点（OpenAI Responses API），用 `openai` Python SDK 实测。所有标注 ✅ 的特性均有对应测试脚本（`gpt/test_01`–`gpt/test_09`）。
-> 📅 **验证时间**：2026-07-23；**web search 于 2026-07-27 重新调查并修正**。除特别说明外，模型为 `openai.gpt-5.6-terra`、区域 `us-east-1`（web search 在三档模型 × `us-east-1` / `us-east-2` / `us-west-2` 交叉验证）。
+> 📅 **验证时间**：2026-07-23；**web search 于 2026-07-27 重新调查并修正；2026-07-30 再次复测**。除特别说明外，模型为 `openai.gpt-5.6-terra`、区域 `us-east-1`。
 >
-> ⚠️ **修正说明（2026-07-27）**：本文早前版本曾断言 hosted web search 在 Bedrock 上不可用。**该结论是错的**——它可用，只是被 `bedrock-websearch:*` IAM 权限门禁。当初的错误源于只用默认 Bedrock API key 测试（其 IAM 用户缺该权限），而失败是静默的。详见[第五节](#五web-search--可用但被一个-iam-权限门禁)。
+> ⚠️ **更新（2026-07-30）**：hosted web search（`web_search` / `web_search_preview`）现在被 **400 硬拒**——行为与其他不支持的 hosted tool 一致。这是相对 2026-07-27 的回退：当时加上 `bedrock-websearch:*` 后可用。Bedrock 似乎已将 `web_search` 从可接受的 tool type 列表中移除。详见[第五节](#五web-search--不再可用2026-07-30-起回退)。
+>
+> ~~**修正说明（2026-07-27）**：本文早前版本曾断言 hosted web search 在 Bedrock 上不可用。当时实测加上 `bedrock-websearch:*` 后确实可用。截至 2026-07-30 Bedrock 已回退此行为，tool type 在校验层即被拒绝。~~
 
 ## 目录
 
@@ -23,7 +25,7 @@
 - [二、访问方式与鉴权](#二访问方式与鉴权)
 - [三、特性总览表](#三特性总览表)
 - [四、已支持特性（详解）](#四已支持特性详解)
-- [五、Web Search —— 可用，但被 IAM 权限门禁](#五web-search--可用但被一个-iam-权限门禁)
+- [五、Web Search —— 不再可用（2026-07-30 起回退）](#五web-search--不再可用2026-07-30-起回退)
 - [六、对照 OpenAI 官方表的能力复核](#六对照-openai-官方表的能力复核)
 
 ---
@@ -87,7 +89,7 @@ print(resp.output_text)
 | 会话状态 | ✅ | [`test_09`](gpt/test_09_capability_matrix.py) | `previous_response_id` 能回忆上一轮 |
 | 推理 effort `max` | ✅ | [`test_09`](gpt/test_09_capability_matrix.py) | `reasoning={"effort":"max"}` 被接受 |
 | 客户端 `tool_search` | ✅ | [`test_09`](gpt/test_09_capability_matrix.py) | 工具类型被接受 |
-| **Web Search（托管工具）** | ✅¹ | [`test_08`](gpt/test_08_web_search.py) | ¹需 `bedrock-websearch:*` 权限；缺权限会**静默失败**（见[第五节](#五web-search--可用但被一个-iam-权限门禁)） |
+| **Web Search（托管工具）** | ❌² | [`test_08`](gpt/test_08_web_search.py) | ²2026-07-30 起 **400** 硬拒 "tool type not supported"；此前（7/27）加 `bedrock-websearch:*` 后可用（见[第五节](#五web-search--不再可用2026-07-30-起回退)） |
 | 其他托管工具（file_search / image_generation / code_interpreter / computer_use / shell） | ❌ | [`test_09`](gpt/test_09_capability_matrix.py) | 直接 **400** "tool type not supported" |
 | 远程 MCP（`server_url`）/ 非 Standard 服务档位 | ❌ | [`test_09`](gpt/test_09_capability_matrix.py) | **400**；须用 connector ARN / 仅 on-demand |
 | 服务端自定义工具 —— Lambda / AgentCore Gateway（`mcp` + connector ARN） | ➖ | — | 文档称支持；此处未测（需部署 Lambda/Gateway） |
@@ -121,38 +123,26 @@ print(resp.output_text)
 
 ---
 
-## 五、Web Search —— 可用，但被一个 IAM 权限门禁
+## 五、Web Search —— 不再可用（2026-07-30 起回退）
 
-**结论：GPT-5.6 在 Bedrock 上的 hosted `web_search` 是可用的。它被 `bedrock-websearch:*` 这个 IAM 权限门禁；缺少该权限时工具会*静默失败*，极易误判为"不支持"。**
+**结论：截至 2026-07-30，hosted `web_search` 被 400 硬拒——报错 "The 'web_search' tool is not supported."，与其他不支持的 hosted tool 行为一致。这是一次回退：2026-07-27 时加上 `bedrock-websearch:*` 后是可用的。**
 
-### 需要的权限
+### 当前行为（2026-07-30）
 
-```json
-{"Effect": "Allow", "Action": "bedrock-websearch:*", "Resource": "*"}
+```
+Error code: 400 - {'error': {'code': 'validation_error',
+  'message': "The 'web_search' tool is not supported.",
+  'param': None, 'type': 'invalid_request_error'}}
 ```
 
-**`AmazonBedrockLimitedAccess`**（控制台生成 API key 时默认挂的策略）和 **`AmazonBedrockFullAccess`** 都**不含**它。`bedrock-websearch` 是一个独立的服务命名空间——不被 `bedrock:*` 或 `bedrock-mantle:*` 覆盖，也不在 botocore 的服务列表里。
+`web_search` 和 `web_search_preview` 两种 tool type 都在 schema 校验层被拒绝——与 `file_search`、`code_interpreter` 等行为完全一致。`bedrock-websearch:*` IAM 权限已无意义，因为请求根本到不了推理层。
 
-Bedrock API key 本质是一个名为 `BedrockAPIKey-<后缀>` 的专用 IAM 用户的长期凭证，所以把权限加到该用户上：
+### 历史行为（2026-07-27，已不可复现）
 
-```bash
-aws iam put-user-policy \
-  --user-name BedrockAPIKey-<后缀> \
-  --policy-name BedrockWebSearchAccess \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Sid": "HostedWebSearchTool",
-      "Effect": "Allow",
-      "Action": "bedrock-websearch:*",
-      "Resource": "*"
-    }]
-  }'
-```
+<details>
+<summary>展开查看——供参考的旧验证结果</summary>
 
-然后用 [`check_gpt56_web_search.py`](check_gpt56_web_search.py) 或 `gpt/test_08` 验证。权限到位后 OpenAI 整套测试 **9/9** 全通过；缺权限时 `test_08` 是唯一失败项。
-
-2026-07-27 实测（`openai.gpt-5.6-terra` @ `us-east-1`，同一个 API key，只改 IAM 策略）：
+2026-07-27 时，`web_search` 在校验层被接受，且加上 `bedrock-websearch:*` 后确实能正常工作。缺权限时则静默失败（HTTP 200，`web_search_call.status="failed"`，无 AccessDenied）。当时测得的权限矩阵：
 
 | 主体权限 | `web_search_call` 结果 |
 |---|---|
@@ -163,25 +153,22 @@ aws iam put-user-policy \
 | **+ `bedrock-websearch:*`** | **`completed`，返回真实引用 ✅** |
 | `AdministratorAccess`（`Action:"*"`） | `completed` ✅ |
 
-补上权限后模型返回真实数据，例如 *"NVDA is currently $206.84 USD per share"*，引用 `investor.nvidia.com`。
+该行为截至 2026-07-30 已不可复现。
 
-### 静默失败这个坑
-
-缺少 `bedrock-websearch:*` 时，API 返回 **HTTP 200**，模型也会规划真实查询并产出 `web_search_call`（含 `search` 与 `open_page` 两种动作）——但每个 `status` 都是 `"failed"`，没有引用，模型还会说"web search 暂时不可用"。**全程没有 `AccessDenied`**，响应里没有任何迹象指向权限问题。
+</details>
 
 ### 补充说明
 
-- **鉴权机制本身无关**：Bedrock API key（bearer）与 SigV4 行为完全一致，起作用的是背后身份的权限。API key 解码后是一个专用 IAM 用户（`BedrockAPIKey-<后缀>`），默认挂 `AmazonBedrockLimitedAccess`——这就是 bearer 路径看起来"坏掉"的原因。
-- OpenAI 的[兼容性指南](https://developers.openai.com/api/docs/guides/amazon-bedrock)把 Bedrock 上的 "Hosted web search" 标为 Not available（截至 2026-07-13 上线）。**该表已过时／未考虑权限因素**——实测可用。
-- `bedrock-websearch` 下的确切动作名未公开，实用做法就是 `bedrock-websearch:*`。（`Search`、`InvokeWebSearch`、`WebSearch`、`OpenPage`、`Retrieve`、`Query`、`Fetch`、`GetPage`、`Browse`、`PerformSearch` 均已逐个测试，都不是。）
-- 其他托管工具（`file_search`、`image_generation`、`code_interpreter`、`computer_use_preview`、`shell`、`server_url` 形式的远程 MCP）是真的不支持——它们在 schema 校验层就 **400 硬拒**，与权限无关。见[第六节](#六对照-openai-官方表的能力复核)。
-- **Claude 在 Bedrock 上完全无法使用 web search**——Anthropic 的 `web_search_20250305` 工具类型在 `bedrock-runtime` 和 `bedrock-mantle` 上都被校验层拒绝，权限给满也一样。见 [Anthropic 指南](ANTHROPIC_API_ON_BEDROCK_CN.md)。
+- 三个 tier（Terra、Sol、Luna）均受影响——Terra 已直接验证。
+- OpenAI 的[兼容性指南](https://developers.openai.com/api/docs/guides/amazon-bedrock)标注 "Hosted web search → Not available"，现在再次与实测吻合。
+- **Claude 在 Bedrock 上同样无法使用 web search**——Anthropic 的 `web_search_20250305` 工具类型在两个端点都被校验层拒绝。见 [Anthropic 指南](ANTHROPIC_API_ON_BEDROCK_CN.md)。
+- 其他 hosted tool（`file_search`、`image_generation`、`code_interpreter`、`computer_use_preview`、`shell`）依旧不支持（400 硬拒），与此前一致。
 
 ---
 
 ## 六、对照 OpenAI 官方表的能力复核
 
-对照 OpenAI [OpenAI models in Amazon Bedrock](https://developers.openai.com/api/docs/guides/amazon-bedrock) 特性表（截至 2026-07-13 上线）里的每一项，直接对 `us-east-1` 的 `openai.gpt-5.6-terra` 实测。除 hosted web search 外所有官方结论均吻合（web search 补上 `bedrock-websearch:*` 后可用，见第五节），汇总在 [`test_09`](gpt/test_09_capability_matrix.py)。
+对照 OpenAI [OpenAI models in Amazon Bedrock](https://developers.openai.com/api/docs/guides/amazon-bedrock) 特性表（截至 2026-07-13 上线）里的每一项，直接对 `us-east-1` 的 `openai.gpt-5.6-terra` 实测。截至 2026-07-30，所有官方结论均已吻合（web search 此前是唯一例外，但 Bedrock 已回退其支持——见第五节），汇总在 [`test_09`](gpt/test_09_capability_matrix.py)。
 
 | OpenAI 文档能力 | 文档 → Bedrock | 实测行为 | 吻合 |
 |-----------------|:---:|---------|:---:|
@@ -198,7 +185,7 @@ aws iam put-user-policy \
 | 自定义工具（Lambda / AgentCore connector） | Available | `mcp`+connector ARN 是唯一被接受的 MCP 形式 | ✅（未完整跑通） |
 | 音频输入 / WebSocket / Pro mode / Multi-agent / Programmatic tool calling | Not available | 未测（无干净探针） | ➖ |
 | 服务档位 | 仅 on-demand | `service_tier="flex"` → **400** | ✅ |
-| Hosted web search | Not available | 给了 `bedrock-websearch:*` 就**可用**；否则静默 `failed` | ❌ 官方表已过时 |
+| Hosted web search | Not available | **400** "tool type not supported"（2026-07-30 起；此前 7/27 加 `bedrock-websearch:*` 后可用） | ✅（现已吻合） |
 | Hosted file search | Not available | **400** tool type not supported | ✅ |
 | Image generation tool | Not available | **400** tool type not supported | ✅ |
 | Code interpreter | Not available | **400** tool type not supported | ✅ |
@@ -208,9 +195,9 @@ aws iam put-user-policy \
 
 ### 表格没写出的两个细节
 
-1. **web search 在 OpenAI 表里被标错了，而且失败方式是个陷阱。** `web_search` / `web_search_preview` 在校验层被接受，并且**确实能用**——前提是调用方持有 `bedrock-websearch:*`。缺该权限时它们在执行阶段失败（`status="failed"`）且**不报 AccessDenied**，看起来与"不支持"一模一样。其余托管工具（`file_search`、`image_generation`、`code_interpreter`、`computer_use_preview`、`shell`）是推理前就 **400 硬拒**——那些才是真不支持，且与权限无关。
+1. **web search 曾短暂可用（2026-07-13 至约 2026-07-30）。** 在上线至 2026-07-30 之间，`web_search` / `web_search_preview` 在校验层被接受，且加上 `bedrock-websearch:*` 后**确实能用**。截至 2026-07-30，它们已被 400 硬拒，与其他不支持的 hosted tool 行为一致。这可能是一次意外暴露后被收回，或者是临时的回退。
 
-2. **API 会自己报出支持的工具类型白名单。** 400 报错原文：*"Supported tool types are: `function`, `mcp`, `custom`, `namespace`, `tool_search`."* 注意 `web_search` **不在**这个列表里（与"不可用"一致），却被接受而非拒绝，前后不一致。`namespace` 则是 OpenAI 表里压根没提的一个受支持类型。
+2. **API 会自己报出支持的工具类型白名单。** 400 报错原文：*"Supported tool types are: `function`, `mcp`, `custom`, `namespace`, `tool_search`."* 注意 `web_search` **不在**这个列表里。`namespace` 则是 OpenAI 表里压根没提的一个受支持类型。
 
 ### 端点 / API / 区域事实
 
