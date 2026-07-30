@@ -62,12 +62,12 @@ uv run python gpt/test_08_web_search.py
 | 05 | `test_05_structured_outputs.py` | Structured outputs (JSON schema) | ✅ |
 | 06 | `test_06_vision.py` | Vision (image input) | ✅ |
 | 07 | `test_07_prompt_caching.py` | Prompt caching | ✅ |
-| 08 | `test_08_web_search.py` | Web search (server-side hosted tool) | ✅ needs `bedrock-websearch:*` ¹ |
+| 08 | `test_08_web_search.py` | Web search (server-side hosted tool) | ❌ (regression 2026-07-30) |
 | 09 | `test_09_capability_matrix.py` | Capability double-check vs OpenAI compat table | ✅ |
 
 All 9 pass once the [web search permission](#web-search-permission) is granted.
 
-¹ Web search **works**, but only if the calling identity holds `bedrock-websearch:*`. Without it the call returns HTTP 200 with `web_search_call.status="failed"` and no `AccessDenied` — a silent failure that looks like the feature is unsupported. Neither `AmazonBedrockLimitedAccess` (the default for Bedrock API key users) nor `AmazonBedrockFullAccess` grants it.
+¹ ~~Web search **works**, but only if the calling identity holds `bedrock-websearch:*`.~~ **Update 2026-07-30**: web search is now hard-rejected with 400 "The 'web_search' tool is not supported." — this is a regression from 2026-07-27 when it worked with the permission. The `web_search` tool type is no longer accepted at validation.
 
 The three tiers (`openai.gpt-5.6-terra` / `-sol` / `-luna`) are configured in [`gpt/helpers.py`](gpt/helpers.py); Terra is the default. See the [OpenAI feature guide](OPENAI_API_ON_BEDROCK_EN.md) for details, especially [the web search IAM permission trap](OPENAI_API_ON_BEDROCK_EN.md#5-web-search--works-but-gated-by-an-iam-permission) and the [full capability double-check](OPENAI_API_ON_BEDROCK_EN.md#6-capability-double-check-vs-openais-table).
 

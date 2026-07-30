@@ -13,9 +13,11 @@
 This document walks through each OpenAI Responses API feature and its support status for the GPT-5.6 tiers (Terra / Sol / Luna) on Amazon Bedrock, along with the access path and behavioral notes. It is the OpenAI counterpart to [ANTHROPIC_API_ON_BEDROCK_EN.md](ANTHROPIC_API_ON_BEDROCK_EN.md).
 
 > 📌 **Verification method**: measured against the Bedrock `bedrock-mantle` endpoint (OpenAI Responses API) using the `openai` Python SDK. Every ✅ has a corresponding test script (`gpt/test_01`–`gpt/test_09`).
-> 📅 **Verified**: 2026-07-23; **web search re-investigated and corrected 2026-07-27**. Model `openai.gpt-5.6-terra` in `us-east-1` unless noted (web search cross-checked on all three tiers in `us-east-1` / `us-east-2` / `us-west-2`).
+> 📅 **Verified**: 2026-07-23; **web search re-investigated and corrected 2026-07-27; re-tested 2026-07-30**. Model `openai.gpt-5.6-terra` in `us-east-1` unless noted.
 >
-> ⚠️ **Correction (2026-07-27)**: an earlier version of this document concluded that hosted web search does not work on Bedrock. That was wrong — it works, and is gated by the `bedrock-websearch:*` IAM permission. The original conclusion came from testing only with a default Bedrock API key, whose IAM user lacks that permission, and the failure is silent. See [§5](#5-web-search--works-but-gated-by-an-iam-permission).
+> ⚠️ **Update (2026-07-30)**: hosted web search (`web_search` / `web_search_preview`) is now **hard-rejected with 400** — the same behavior as other unsupported hosted tools. This is a regression from 2026-07-27 when it worked with `bedrock-websearch:*`. Bedrock appears to have removed `web_search` from the accepted tool-type list. See [§5](#5-web-search--no-longer-works-regression-since-2026-07-30).
+>
+> ~~**Correction (2026-07-27)**: an earlier version of this document concluded that hosted web search does not work on Bedrock. That was wrong — it worked when gated by `bedrock-websearch:*`. As of 2026-07-30 Bedrock has reverted this: the tool type is now rejected at validation.~~
 
 ## Table of Contents
 
@@ -23,7 +25,7 @@ This document walks through each OpenAI Responses API feature and its support st
 - [2. Access & Authentication](#2-access--authentication)
 - [3. Feature Overview](#3-feature-overview)
 - [4. Supported Features (detail)](#4-supported-features-detail)
-- [5. Web Search — Works, but Gated by an IAM Permission](#5-web-search--works-but-gated-by-an-iam-permission)
+- [5. Web Search — No Longer Works (Regression since 2026-07-30)](#5-web-search--no-longer-works-regression-since-2026-07-30)
 - [6. Capability Double-Check vs OpenAI's Table](#6-capability-double-check-vs-openais-table)
 
 ---
@@ -87,7 +89,7 @@ See [`gpt/helpers.py`](gpt/helpers.py) for the shared client used by the tests.
 | Conversation state | ✅ | [`test_09`](gpt/test_09_capability_matrix.py) | `previous_response_id` recalls prior turn |
 | Reasoning effort `max` | ✅ | [`test_09`](gpt/test_09_capability_matrix.py) | `reasoning={"effort":"max"}` accepted |
 | Client-side `tool_search` | ✅ | [`test_09`](gpt/test_09_capability_matrix.py) | tool type accepted |
-| **Web Search (hosted tool)** | ✅¹ | [`test_08`](gpt/test_08_web_search.py) | ¹requires `bedrock-websearch:*` IAM perm; fails **silently** without it (see [§5](#5-web-search--works-but-gated-by-an-iam-permission)) |
+| **Web Search (hosted tool)** | ❌² | [`test_08`](gpt/test_08_web_search.py) | ²hard **400** "tool type not supported" as of 2026-07-30; previously worked with `bedrock-websearch:*` (see [§5](#5-web-search--no-longer-works-regression-since-2026-07-30)) |
 | Other hosted tools (file_search / image_generation / code_interpreter / computer_use / shell) | ❌ | [`test_09`](gpt/test_09_capability_matrix.py) | hard **400** "tool type not supported" |
 | Remote MCP (`server_url`) / non-Standard service tier | ❌ | [`test_09`](gpt/test_09_capability_matrix.py) | **400**; use connector ARN / on-demand only |
 | Server-side custom tools — Lambda / AgentCore Gateway (`mcp` + connector ARN) | ➖ | — | Documented as supported; not exercised here (requires deploying a Lambda/Gateway) |
@@ -121,38 +123,26 @@ Send a large shared prefix (via `instructions`) twice with the same `prompt_cach
 
 ---
 
-## 5. Web Search — Works, but Gated by an IAM Permission
+## 5. Web Search — No Longer Works (Regression since 2026-07-30)
 
-**Summary: hosted `web_search` DOES work for GPT-5.6 on Bedrock. It is gated by the `bedrock-websearch:*` IAM permission, and without it the tool fails *silently* — which is easy to misdiagnose as "not supported".**
+**Summary: as of 2026-07-30, hosted `web_search` is hard-rejected with 400 "The 'web_search' tool is not supported." — the same behavior as other unsupported hosted tools. This is a regression: it previously worked (2026-07-27) when the caller held `bedrock-websearch:*`.**
 
-### The permission
+### Current behavior (2026-07-30)
 
-```json
-{"Effect": "Allow", "Action": "bedrock-websearch:*", "Resource": "*"}
+```
+Error code: 400 - {'error': {'code': 'validation_error',
+  'message': "The 'web_search' tool is not supported.",
+  'param': None, 'type': 'invalid_request_error'}}
 ```
 
-Neither **`AmazonBedrockLimitedAccess`** (what console-generated Bedrock API key users get) nor **`AmazonBedrockFullAccess`** includes it. `bedrock-websearch` is a separate service namespace — not covered by `bedrock:*` or `bedrock-mantle:*`, and absent from botocore's service list.
+Both `web_search` and `web_search_preview` tool types are rejected at schema validation — identical to `file_search`, `code_interpreter`, etc. The `bedrock-websearch:*` IAM permission is irrelevant since the request never reaches the inference layer.
 
-A Bedrock API key is the long-term credential of a dedicated IAM user called `BedrockAPIKey-<suffix>`, so grant it there:
+### Historical behavior (2026-07-27, no longer current)
 
-```bash
-aws iam put-user-policy \
-  --user-name BedrockAPIKey-<suffix> \
-  --policy-name BedrockWebSearchAccess \
-  --policy-document '{
-    "Version": "2012-10-17",
-    "Statement": [{
-      "Sid": "HostedWebSearchTool",
-      "Effect": "Allow",
-      "Action": "bedrock-websearch:*",
-      "Resource": "*"
-    }]
-  }'
-```
+<details>
+<summary>Click to expand — prior findings for reference</summary>
 
-Then verify with [`check_gpt56_web_search.py`](check_gpt56_web_search.py) or `gpt/test_08`. With the permission in place the full OpenAI suite runs **9/9**; without it `test_08` is the only failure.
-
-Verified 2026-07-27 on `openai.gpt-5.6-terra` @ `us-east-1` — same API key, only the IAM policy changed:
+On 2026-07-27, `web_search` was accepted at validation and actually worked when the caller held `bedrock-websearch:*`. Without the permission it failed silently (HTTP 200, `web_search_call.status="failed"`, no AccessDenied). The following permission matrix was measured:
 
 | Principal's permissions | `web_search_call` result |
 |---|---|
@@ -163,25 +153,22 @@ Verified 2026-07-27 on `openai.gpt-5.6-terra` @ `us-east-1` — same API key, on
 | **+ `bedrock-websearch:*`** | **`completed`, real citations ✅** |
 | `AdministratorAccess` (`Action:"*"`) | `completed` ✅ |
 
-With the permission the model returns real data, e.g. *"NVDA is currently $206.84 USD per share"* citing `investor.nvidia.com`.
+This behavior is no longer reproducible as of 2026-07-30.
 
-### The silent-failure trap
-
-Without `bedrock-websearch:*` the API returns **HTTP 200**, the model plans real queries and emits `web_search_call` items (both `search` and `open_page` actions) — but every one has `status: "failed"`, there are no citations, and the model says "web search is temporarily unavailable". **There is no `AccessDenied`.** Nothing in the response points at permissions.
+</details>
 
 ### Notes
 
-- The auth *mechanism* is irrelevant: a Bedrock API key (bearer) and SigV4 behave identically. What matters is the permissions of the identity behind them. A Bedrock API key decodes to a dedicated IAM user (`BedrockAPIKey-<suffix>`) carrying `AmazonBedrockLimitedAccess`, which is why the bearer path looks broken by default.
-- OpenAI's [compatibility guide](https://developers.openai.com/api/docs/guides/amazon-bedrock) lists "Hosted web search → Not available" on Bedrock (as of the 2026-07-13 launch). **That is out of date / does not account for the permission** — it demonstrably works.
-- The exact action verb under `bedrock-websearch` is undocumented; `bedrock-websearch:*` is the practical grant. (`Search`, `InvokeWebSearch`, `WebSearch`, `OpenPage`, `Retrieve`, `Query`, `Fetch`, `GetPage`, `Browse`, `PerformSearch` were each tested and are not it.)
-- Other hosted tools (`file_search`, `image_generation`, `code_interpreter`, `computer_use_preview`, `shell`, remote MCP via `server_url`) are genuinely unsupported — **hard-rejected with 400** at schema validation, which is permission-independent. See [§6](#6-capability-double-check-vs-openais-table).
-- **Claude models cannot do web search on Bedrock at all** — Anthropic's `web_search_20250305` tool type is rejected at validation on both `bedrock-runtime` and `bedrock-mantle`, even with full permissions. See the [Anthropic guide](ANTHROPIC_API_ON_BEDROCK_EN.md).
+- The change affects all three tiers (Terra, Sol, Luna) — Terra verified directly.
+- OpenAI's [compatibility guide](https://developers.openai.com/api/docs/guides/amazon-bedrock) lists "Hosted web search → Not available" which now matches measured behavior again.
+- **Claude models also cannot do web search on Bedrock** — Anthropic's `web_search_20250305` tool type is rejected at validation on both endpoints. See the [Anthropic guide](ANTHROPIC_API_ON_BEDROCK_EN.md).
+- Other hosted tools (`file_search`, `image_generation`, `code_interpreter`, `computer_use_preview`, `shell`) remain unsupported (400 hard reject) as before.
 
 ---
 
 ## 6. Capability Double-Check vs OpenAI's Table
 
-Each capability in OpenAI's [OpenAI models in Amazon Bedrock](https://developers.openai.com/api/docs/guides/amazon-bedrock) feature table (as of the 2026-07-13 launch) was exercised directly against `openai.gpt-5.6-terra` in `us-east-1`. Every claim matched **except hosted web search**, which works once `bedrock-websearch:*` is granted (see §5). Consolidated in [`test_09`](gpt/test_09_capability_matrix.py).
+Each capability in OpenAI's [OpenAI models in Amazon Bedrock](https://developers.openai.com/api/docs/guides/amazon-bedrock) feature table (as of the 2026-07-13 launch) was exercised directly against `openai.gpt-5.6-terra` in `us-east-1`. As of 2026-07-30, all claims now match (web search was previously an exception but Bedrock has reverted its support — see §5). Consolidated in [`test_09`](gpt/test_09_capability_matrix.py).
 
 | OpenAI doc capability | Doc → Bedrock | Measured behavior | Match |
 |-----------------------|:---:|-------------------|:---:|
@@ -198,7 +185,7 @@ Each capability in OpenAI's [OpenAI models in Amazon Bedrock](https://developers
 | Custom tools (Lambda / AgentCore connector) | Available | `mcp`+connector ARN is the only accepted MCP form | ✅ (not fully exercised) |
 | Audio input / WebSocket / Pro mode / Multi-agent / Programmatic tool calling | Not available | not tested (no clean probe) | ➖ |
 | Service tiers | On-demand only | `service_tier="flex"` → **400** | ✅ |
-| Hosted web search | Not available | **works** given `bedrock-websearch:*`; silently `failed` without it | ❌ doc is stale |
+| Hosted web search | Not available | **400** "tool type not supported" (as of 2026-07-30; previously worked with `bedrock-websearch:*` on 2026-07-27) | ✅ (now matches) |
 | Hosted file search | Not available | **400** tool type not supported | ✅ |
 | Image generation tool | Not available | **400** tool type not supported | ✅ |
 | Code interpreter | Not available | **400** tool type not supported | ✅ |
@@ -208,9 +195,9 @@ Each capability in OpenAI's [OpenAI models in Amazon Bedrock](https://developers
 
 ### Two nuances the flat table doesn't show
 
-1. **Web search is mislabeled in OpenAI's table, and its failure mode is a trap.** `web_search` / `web_search_preview` are *accepted at validation* and actually **work** — provided the caller holds `bedrock-websearch:*`. Without that permission they fail at execution (`status="failed"`) with **no AccessDenied**, which looks identical to "unsupported". Every other hosted tool (`file_search`, `image_generation`, `code_interpreter`, `computer_use_preview`, `shell`) is *hard-rejected with a 400* before inference — those really are unsupported, permission-independent.
+1. **Web search had a brief window of availability (2026-07-13 to ~2026-07-30).** Between launch and 2026-07-30, `web_search` / `web_search_preview` were *accepted at validation* and actually **worked** — provided the caller held `bedrock-websearch:*`. As of 2026-07-30, they are hard-rejected with 400 like other unsupported hosted tools. This may have been an unintended exposure that was subsequently locked down, or a temporary regression.
 
-2. **The API reports its own supported tool-type allow-list.** The 400 messages state: *"Supported tool types are: `function`, `mcp`, `custom`, `namespace`, `tool_search`."* Note `web_search` is **not** in this list (consistent with "not available"), yet it is inconsistently accepted rather than rejected. `namespace` is a supported type not mentioned in OpenAI's table at all.
+2. **The API reports its own supported tool-type allow-list.** The 400 messages state: *"Supported tool types are: `function`, `mcp`, `custom`, `namespace`, `tool_search`."* Note `web_search` is **not** in this list. `namespace` is a supported type not mentioned in OpenAI's table at all.
 
 ### Endpoint / API / region facts
 
